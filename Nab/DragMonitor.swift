@@ -60,7 +60,7 @@ final class DragMonitor {
         guard current != baselineChangeCount else { return }
         baselineChangeCount = current
 
-        guard pasteboardHoldsFiles() else { return }
+        guard pasteboardHoldsDraggableContent() else { return }
 
         inDrag = true
         dragStarted()
@@ -73,8 +73,13 @@ final class DragMonitor {
         dragEnded()
     }
 
-    private func pasteboardHoldsFiles() -> Bool {
-        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
-        return pasteboard.canReadObject(forClasses: [NSURL.self], options: options)
+    private func pasteboardHoldsDraggableContent() -> Bool {
+        let fileOptions: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        if pasteboard.canReadObject(forClasses: [NSURL.self], options: fileOptions) {
+            return true
+        }
+        // Screenshot thumbnails (Cmd+Shift+4) and dragged images expose image data
+        // rather than a file URL until materialized on drop.
+        return pasteboard.canReadObject(forClasses: [NSImage.self], options: [:])
     }
 }

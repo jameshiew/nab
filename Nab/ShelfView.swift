@@ -1,11 +1,14 @@
 import SwiftUI
 import AppKit
 import QuickLookThumbnailing
+import UniformTypeIdentifiers
 
 struct ShelfView: View {
     @Bindable var model: ShelfModel
     var onDropReceived: () -> Void = {}
     var onItemDragEnded: () -> Void = {}
+
+    private static let acceptedTypes: [UTType] = [.fileURL, .image]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,23 +22,92 @@ struct ShelfView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(.white.opacity(0.08), lineWidth: 0.5)
         )
-        .dropDestination(for: URL.self) { (urls: [URL], _) -> Bool in
-            handleDrop(urls: urls)
+        .onDrop(of: Self.acceptedTypes, isTargeted: nil) { providers in
+            handleDrop(providers: providers)
         }
     }
 
-    private func handleDrop(urls: [URL]) -> Bool {
-        let files = urls.filter { $0.isFileURL }
-        guard !files.isEmpty else { return false }
-        let result = model.add(files)
-        if result.added == 0 && result.duplicates > 0 {
-            NSAnimationEffect.poof.show(
-                centeredAt: NSEvent.mouseLocation,
-                size: NSSize(width: 32, height: 32)
-            )
+    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        guard !providers.isEmpty else { return false }
+        Task { @MainActor in
+            var urls: [URL] = []
+            for provider in providers {
+                if let url = await ShelfView.extractURL(from: provider) {
+                    urls.append(url)
+                }
+            }
+            guard !urls.isEmpty else { return }
+            let result = model.add(urls)
+            if result.added == 0 && result.duplicates > 0 {
+                NSAnimationEffect.poof.show(
+                    centeredAt: NSEvent.mouseLocation,
+                    size: NSSize(width: 32, height: 32)
+                )
+            }
+            onDropReceived()
         }
-        onDropReceived()
         return true
+    }
+
+    private static func extractURL(from provider: NSItemProvider) async -> URL? {
+        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
+            let url = await loadFileURL(from: provider),
+            FileManager.default.fileExists(atPath: url.path)
+        {
+            return url
+        }
+        let imageTypes: [(UTType, String)] = [
+            (.png, "png"),
+            (.jpeg, "jpg"),
+            (.heic, "heic"),
+            (.tiff, "tiff"),
+            (.gif, "gif"),
+        ]
+        for (type, ext) in imageTypes
+        where provider.hasItemConformingToTypeIdentifier(type.identifier) {
+            if let data = await loadData(from: provider, typeID: type.identifier),
+                let url = saveDroppedImage(data: data, ext: ext)
+            {
+                return url
+            }
+        }
+        return nil
+    }
+
+    private static func loadFileURL(from provider: NSItemProvider) async -> URL? {
+        await withCheckedContinuation { (cont: CheckedContinuation<URL?, Never>) in
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                let url: URL? = {
+                    if let u = item as? URL { return u }
+                    if let data = item as? Data { return URL(dataRepresentation: data, relativeTo: nil) }
+                    if let s = item as? String { return URL(string: s) }
+                    return nil
+                }()
+                cont.resume(returning: (url?.isFileURL == true) ? url : nil)
+            }
+        }
+    }
+
+    private static func loadData(from provider: NSItemProvider, typeID: String) async -> Data? {
+        await withCheckedContinuation { (cont: CheckedContinuation<Data?, Never>) in
+            provider.loadDataRepresentation(forTypeIdentifier: typeID) { data, _ in
+                cont.resume(returning: data)
+            }
+        }
+    }
+
+    private static func saveDroppedImage(data: Data, ext: String) -> URL? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
+        let filename = "Screenshot \(formatter.string(from: Date())).\(ext)"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        do {
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
+        }
     }
 
     private var header: some View {
