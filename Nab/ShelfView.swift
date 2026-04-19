@@ -4,6 +4,7 @@ import AppKit
 struct ShelfView: View {
     @Bindable var model: ShelfModel
     var onDropReceived: () -> Void = {}
+    var onItemDragEnded: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 0) {
@@ -73,7 +74,11 @@ struct ShelfView: View {
             ScrollView {
                 LazyVStack(spacing: 4) {
                     ForEach(model.items) { item in
-                        ShelfRow(item: item) { model.remove(item.id) }
+                        ShelfRow(
+                            item: item,
+                            onRemove: { model.remove(item.id) },
+                            onDragEnded: onItemDragEnded
+                        )
                     }
                 }
                 .padding(8)
@@ -85,11 +90,12 @@ struct ShelfView: View {
 private struct ShelfRow: View {
     let item: ShelfItem
     let onRemove: () -> Void
+    let onDragEnded: () -> Void
     @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 8) {
-            FileDragSource(url: item.url, onMoved: onRemove) {
+            FileDragSource(url: item.url, onMoved: onRemove, onDragEnded: onDragEnded) {
                 HStack(spacing: 8) {
                     Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path))
                         .resizable()
@@ -126,6 +132,7 @@ private struct ShelfRow: View {
 private struct FileDragSource<Content: View>: NSViewRepresentable {
     let url: URL
     let onMoved: () -> Void
+    let onDragEnded: () -> Void
     @ViewBuilder let content: () -> Content
 
     func makeNSView(context: Context) -> FileDragSourceView {
@@ -134,6 +141,7 @@ private struct FileDragSource<Content: View>: NSViewRepresentable {
         let view = FileDragSourceView()
         view.url = url
         view.onMoved = onMoved
+        view.onDragEnded = onDragEnded
         view.addSubview(host)
         NSLayoutConstraint.activate([
             host.topAnchor.constraint(equalTo: view.topAnchor),
@@ -148,6 +156,7 @@ private struct FileDragSource<Content: View>: NSViewRepresentable {
     func updateNSView(_ nsView: FileDragSourceView, context: Context) {
         nsView.url = url
         nsView.onMoved = onMoved
+        nsView.onDragEnded = onDragEnded
         (nsView.hostingView as? NSHostingView<Content>)?.rootView = content()
     }
 }
@@ -155,6 +164,7 @@ private struct FileDragSource<Content: View>: NSViewRepresentable {
 private final class FileDragSourceView: NSView, NSDraggingSource {
     var url: URL = URL(fileURLWithPath: "/")
     var onMoved: () -> Void = {}
+    var onDragEnded: () -> Void = {}
     weak var hostingView: NSView?
 
     private var mouseDownLocation: NSPoint?
@@ -214,5 +224,6 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
         if operation == .move {
             onMoved()
         }
+        onDragEnded()
     }
 }

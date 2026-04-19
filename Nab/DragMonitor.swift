@@ -34,6 +34,22 @@ final class DragMonitor {
         upMonitor = nil
     }
 
+    /// Call when the app itself has just finished a drag session. Because
+    /// `NSDraggingSession` consumes the events that would normally drive
+    /// `handleDrag`/`handleUp`, our monitor can be left with a stale baseline
+    /// (pasteboard was bumped by our own `beginDraggingSession`, but we never
+    /// observed the mouseUp that would resync it). Any later innocent drag in
+    /// another app would then look like a fresh file drag, because the drag
+    /// pasteboard still holds our file URL.
+    func endOwnDrag() {
+        let wasInDrag = inDrag
+        inDrag = false
+        baselineChangeCount = pasteboard.changeCount
+        if wasInDrag {
+            dragEnded()
+        }
+    }
+
     private func handleDrag() {
         if inDrag { return }
         let now = ProcessInfo.processInfo.systemUptime
