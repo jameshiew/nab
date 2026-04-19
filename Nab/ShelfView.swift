@@ -81,6 +81,7 @@ struct ShelfView: View {
                     ForEach(model.items) { item in
                         ShelfIcon(
                             item: item,
+                            resolveURL: { model.resolveURL(for: item.id) },
                             onRemove: { model.remove(item.id) },
                             onDragEnded: onItemDragEnded
                         )
@@ -94,6 +95,7 @@ struct ShelfView: View {
 
 private struct ShelfIcon: View {
     let item: ShelfItem
+    let resolveURL: () -> URL?
     let onRemove: () -> Void
     let onDragEnded: () -> Void
     @State private var hovering = false
@@ -105,9 +107,10 @@ private struct ShelfIcon: View {
         VStack(spacing: 4) {
             ZStack(alignment: .topTrailing) {
                 FileDragSource(
-                    url: item.url,
+                    resolveURL: resolveURL,
                     dragImage: thumbnail,
                     onMoved: onRemove,
+                    onMissing: onRemove,
                     onDragEnded: onDragEnded
                 ) {
                     Image(nsImage: thumbnail ?? NSWorkspace.shared.icon(forFile: item.url.path))
@@ -141,7 +144,7 @@ private struct ShelfIcon: View {
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .task(id: item.id) {
+        .task(id: item.url) {
             await loadThumbnail()
         }
     }
@@ -161,9 +164,10 @@ private struct ShelfIcon: View {
 }
 
 private struct FileDragSource<Content: View>: NSViewRepresentable {
-    let url: URL
+    let resolveURL: () -> URL?
     let dragImage: NSImage?
     let onMoved: () -> Void
+    let onMissing: () -> Void
     let onDragEnded: () -> Void
     @ViewBuilder let content: () -> Content
 
@@ -171,9 +175,10 @@ private struct FileDragSource<Content: View>: NSViewRepresentable {
         let host = NSHostingView(rootView: content())
         host.translatesAutoresizingMaskIntoConstraints = false
         let view = FileDragSourceView()
-        view.url = url
+        view.resolveURL = resolveURL
         view.dragImage = dragImage
         view.onMoved = onMoved
+        view.onMissing = onMissing
         view.onDragEnded = onDragEnded
         view.addSubview(host)
         NSLayoutConstraint.activate([
@@ -187,18 +192,20 @@ private struct FileDragSource<Content: View>: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: FileDragSourceView, context: Context) {
-        nsView.url = url
+        nsView.resolveURL = resolveURL
         nsView.dragImage = dragImage
         nsView.onMoved = onMoved
+        nsView.onMissing = onMissing
         nsView.onDragEnded = onDragEnded
         (nsView.hostingView as? NSHostingView<Content>)?.rootView = content()
     }
 }
 
 private final class FileDragSourceView: NSView, NSDraggingSource {
-    var url: URL = URL(fileURLWithPath: "/")
+    var resolveURL: () -> URL? = { nil }
     var dragImage: NSImage?
     var onMoved: () -> Void = {}
+    var onMissing: () -> Void = {}
     var onDragEnded: () -> Void = {}
     weak var hostingView: NSView?
 
@@ -227,6 +234,15 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
     }
 
     private func startDrag(with event: NSEvent) {
+        guard let url = resolveURL() else {
+            NSAnimationEffect.poof.show(
+                centeredAt: NSEvent.mouseLocation,
+                size: NSSize(width: 32, height: 32)
+            )
+            onMissing()
+            onDragEnded()
+            return
+        }
         let dragSize: CGFloat = 48
         let image: NSImage = {
             if let dragImage, let copy = dragImage.copy() as? NSImage {
