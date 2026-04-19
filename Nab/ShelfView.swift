@@ -79,14 +79,19 @@ private struct ShelfRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path))
-                .resizable()
-                .frame(width: 28, height: 28)
-            Text(item.displayName)
-                .font(.system(size: 12))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            FileDragSource(url: item.url, onMoved: onRemove) {
+                HStack(spacing: 8) {
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path))
+                        .resizable()
+                        .frame(width: 28, height: 28)
+                    Text(item.displayName)
+                        .font(.system(size: 12))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+            }
             if hovering {
                 Button(action: onRemove) {
                     Image(systemName: "xmark.circle.fill")
@@ -105,16 +110,99 @@ private struct ShelfRow: View {
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .draggable(item.url) {
-            HStack(spacing: 6) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path))
-                    .resizable()
-                    .frame(width: 24, height: 24)
-                Text(item.displayName).font(.system(size: 12))
-            }
-            .padding(6)
-            .background(.regularMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+private struct FileDragSource<Content: View>: NSViewRepresentable {
+    let url: URL
+    let onMoved: () -> Void
+    @ViewBuilder let content: () -> Content
+
+    func makeNSView(context: Context) -> FileDragSourceView {
+        let host = NSHostingView(rootView: content())
+        host.translatesAutoresizingMaskIntoConstraints = false
+        let view = FileDragSourceView()
+        view.url = url
+        view.onMoved = onMoved
+        view.addSubview(host)
+        NSLayoutConstraint.activate([
+            host.topAnchor.constraint(equalTo: view.topAnchor),
+            host.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            host.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ])
+        view.hostingView = host
+        return view
+    }
+
+    func updateNSView(_ nsView: FileDragSourceView, context: Context) {
+        nsView.url = url
+        nsView.onMoved = onMoved
+        (nsView.hostingView as? NSHostingView<Content>)?.rootView = content()
+    }
+}
+
+private final class FileDragSourceView: NSView, NSDraggingSource {
+    var url: URL = URL(fileURLWithPath: "/")
+    var onMoved: () -> Void = {}
+    weak var hostingView: NSView?
+
+    private var mouseDownLocation: NSPoint?
+    private static let dragThreshold: CGFloat = 3
+
+    override var intrinsicContentSize: NSSize {
+        hostingView?.intrinsicContentSize ?? super.intrinsicContentSize
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        mouseDownLocation = event.locationInWindow
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = mouseDownLocation else { return }
+        let dx = event.locationInWindow.x - start.x
+        let dy = event.locationInWindow.y - start.y
+        guard hypot(dx, dy) > Self.dragThreshold else { return }
+        mouseDownLocation = nil
+        startDrag(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        mouseDownLocation = nil
+    }
+
+    private func startDrag(with event: NSEvent) {
+        let iconSize: CGFloat = 32
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        icon.size = NSSize(width: iconSize, height: iconSize)
+        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+        let location = convert(event.locationInWindow, from: nil)
+        item.setDraggingFrame(
+            NSRect(
+                x: location.x - iconSize / 2,
+                y: location.y - iconSize / 2,
+                width: iconSize,
+                height: iconSize
+            ),
+            contents: icon
+        )
+        beginDraggingSession(with: [item], event: event, source: self)
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        sourceOperationMaskFor context: NSDraggingContext
+    ) -> NSDragOperation {
+        [.move, .copy]
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        if operation == .move {
+            onMoved()
         }
     }
 }
