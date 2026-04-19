@@ -78,8 +78,7 @@ struct ShelfView: View {
                     ForEach(model.items) { item in
                         ShelfIcon(
                             item: item,
-                            resolveURL: { model.resolveURL(for: item.id) },
-                            onRemove: { model.remove(item.id) },
+                            model: model,
                             onDragEnded: onItemDragEnded
                         )
                     }
@@ -93,8 +92,7 @@ struct ShelfView: View {
 
 private struct ShelfIcon: View {
     let item: ShelfItem
-    let resolveURL: () -> URL?
-    let onRemove: () -> Void
+    let model: ShelfModel
     let onDragEnded: () -> Void
     @State private var hovering = false
     @State private var thumbnail: NSImage?
@@ -102,47 +100,49 @@ private struct ShelfIcon: View {
     private static let iconSize: CGFloat = 96
 
     var body: some View {
+        let isSelected = model.isSelected(item.id)
         VStack(spacing: 6) {
-            HStack(spacing: 0) {
-                Color.clear.frame(maxWidth: .infinity)
-                FileDragSource(
-                    resolveURL: resolveURL,
-                    dragImage: thumbnail,
-                    onMoved: onRemove,
-                    onMissing: onRemove,
-                    onDragEnded: onDragEnded,
-                    onQuickLook: quickLook
-                ) {
+            FileDragSource(
+                itemID: item.id,
+                model: model,
+                dragImage: thumbnail,
+                onDragEnded: onDragEnded,
+                onQuickLook: quickLook
+            ) {
+                HStack(spacing: 0) {
+                    Color.clear.frame(maxWidth: .infinity)
                     Image(nsImage: thumbnail ?? NSWorkspace.shared.icon(forFile: item.url.path))
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(width: Self.iconSize, height: Self.iconSize)
-                }
-                Color.clear
-                    .frame(maxWidth: .infinity)
-                    .overlay {
-                        VStack(spacing: 10) {
-                            Button(action: onRemove) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 24))
-                                    .symbolRenderingMode(.palette)
-                                    .foregroundStyle(.white, .black.opacity(0.6))
-                            }
-                            .buttonStyle(.plain)
-                            .help("Remove")
+                    Color.clear
+                        .frame(maxWidth: .infinity)
+                        .overlay {
+                            VStack(spacing: 10) {
+                                Button(action: { model.remove(item.id) }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 24))
+                                        .symbolRenderingMode(.palette)
+                                        .foregroundStyle(.white, .black.opacity(0.6))
+                                }
+                                .buttonStyle(.plain)
+                                .help("Remove")
 
-                            Button(action: quickLook) {
-                                Image(systemName: "eye.circle.fill")
-                                    .font(.system(size: 24))
-                                    .symbolRenderingMode(.palette)
-                                    .foregroundStyle(.white, .black.opacity(0.6))
+                                Button(action: quickLook) {
+                                    Image(systemName: "eye.circle.fill")
+                                        .font(.system(size: 24))
+                                        .symbolRenderingMode(.palette)
+                                        .foregroundStyle(.white, .black.opacity(0.6))
+                                }
+                                .buttonStyle(.plain)
+                                .help("Quick Look")
                             }
-                            .buttonStyle(.plain)
-                            .help("Quick Look")
+                            .opacity(hovering ? 1 : 0)
                         }
-                        .opacity(hovering ? 1 : 0)
-                    }
+                }
+                .frame(height: Self.iconSize)
             }
+            .frame(maxWidth: .infinity)
             Text(item.displayName)
                 .font(.system(size: 12))
                 .lineLimit(1)
@@ -153,7 +153,7 @@ private struct ShelfIcon: View {
         .padding(4)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(hovering ? .white.opacity(0.08) : .clear)
+                .fill((isSelected || hovering) ? .white.opacity(0.08) : .clear)
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
@@ -163,8 +163,8 @@ private struct ShelfIcon: View {
     }
 
     private func quickLook() {
-        guard let url = resolveURL() else {
-            onRemove()
+        guard let url = model.resolveURL(for: item.id) else {
+            model.remove(item.id)
             return
         }
         QuickLookCoordinator.shared.preview(url: url)
@@ -231,10 +231,9 @@ private struct WindowDragHandle: NSViewRepresentable {
 }
 
 private struct FileDragSource<Content: View>: NSViewRepresentable {
-    let resolveURL: () -> URL?
+    let itemID: ShelfItem.ID
+    let model: ShelfModel
     let dragImage: NSImage?
-    let onMoved: () -> Void
-    let onMissing: () -> Void
     let onDragEnded: () -> Void
     let onQuickLook: () -> Void
     @ViewBuilder let content: () -> Content
@@ -243,10 +242,9 @@ private struct FileDragSource<Content: View>: NSViewRepresentable {
         let host = NSHostingView(rootView: content())
         host.translatesAutoresizingMaskIntoConstraints = false
         let view = FileDragSourceView()
-        view.resolveURL = resolveURL
+        view.itemID = itemID
+        view.model = model
         view.dragImage = dragImage
-        view.onMoved = onMoved
-        view.onMissing = onMissing
         view.onDragEnded = onDragEnded
         view.onQuickLook = onQuickLook
         view.addSubview(host)
@@ -261,28 +259,36 @@ private struct FileDragSource<Content: View>: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: FileDragSourceView, context: Context) {
-        nsView.resolveURL = resolveURL
+        nsView.itemID = itemID
+        nsView.model = model
         nsView.dragImage = dragImage
-        nsView.onMoved = onMoved
-        nsView.onMissing = onMissing
         nsView.onDragEnded = onDragEnded
         nsView.onQuickLook = onQuickLook
         (nsView.hostingView as? NSHostingView<Content>)?.rootView = content()
     }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: FileDragSourceView, context: Context) -> CGSize? {
+        let intrinsic = nsView.hostingView?.intrinsicContentSize ?? .zero
+        return CGSize(
+            width: proposal.width ?? intrinsic.width,
+            height: proposal.height ?? intrinsic.height
+        )
+    }
 }
 
 private final class FileDragSourceView: NSView, NSDraggingSource {
-    var resolveURL: () -> URL? = { nil }
+    var itemID: ShelfItem.ID?
+    weak var model: ShelfModel?
     var dragImage: NSImage?
-    var onMoved: () -> Void = {}
-    var onMissing: () -> Void = {}
     var onDragEnded: () -> Void = {}
     var onQuickLook: () -> Void = {}
     weak var hostingView: NSView?
 
     private var mouseDownLocation: NSPoint?
+    private var pendingClickAction: (() -> Void)?
     private var cursorInsideShelf = true
     private var didForceClick = false
+    private var draggedIDs: [ShelfItem.ID] = []
     private static let dragThreshold: CGFloat = 3
 
     override init(frame frameRect: NSRect) {
@@ -292,30 +298,54 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    override var intrinsicContentSize: NSSize {
-        hostingView?.intrinsicContentSize ?? super.intrinsicContentSize
-    }
-
     override func mouseDown(with event: NSEvent) {
         NabLog.write("FileDragSource mouseDown clickCount=\(event.clickCount)")
         didForceClick = false
+        guard let itemID, let model else { return }
+
         if event.clickCount == 2 {
             mouseDownLocation = nil
-            guard let url = resolveURL() else {
-                onMissing()
+            pendingClickAction = nil
+            guard let url = model.resolveURL(for: itemID) else {
+                model.remove(itemID)
                 return
             }
             NabLog.write("FileDragSource opening \(url.path)")
             NSWorkspace.shared.open(url)
             return
         }
+
         mouseDownLocation = event.locationInWindow
+        pendingClickAction = nil
+
+        let modifiers = event.modifierFlags
+        if modifiers.contains(.shift) {
+            model.extendSelection(to: itemID)
+        } else if modifiers.contains(.command) {
+            if model.isSelected(itemID) {
+                // Defer removal — a drag should carry the clicked item along
+                // with the rest of the selection rather than dropping it.
+                pendingClickAction = { [weak model] in
+                    model?.toggleSelection(itemID)
+                }
+            } else {
+                model.toggleSelection(itemID)
+            }
+        } else if model.isSelected(itemID) {
+            // Defer so a drag uses the whole selection; only apply on release.
+            pendingClickAction = { [weak model] in
+                model?.plainClick(itemID)
+            }
+        } else {
+            model.plainClick(itemID)
+        }
     }
 
     override func pressureChange(with event: NSEvent) {
         guard !didForceClick, event.stage >= 2 else { return }
         didForceClick = true
         mouseDownLocation = nil
+        pendingClickAction = nil
         NabLog.write("FileDragSource force click")
         onQuickLook()
     }
@@ -326,47 +356,74 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
         let dy = event.locationInWindow.y - start.y
         guard hypot(dx, dy) > Self.dragThreshold else { return }
         mouseDownLocation = nil
+        pendingClickAction = nil
         startDrag(with: event)
     }
 
     override func mouseUp(with event: NSEvent) {
         NabLog.write("FileDragSource mouseUp clickCount=\(event.clickCount)")
         mouseDownLocation = nil
+        pendingClickAction?()
+        pendingClickAction = nil
     }
 
     private func startDrag(with event: NSEvent) {
-        guard let url = resolveURL() else {
+        guard let itemID, let model else { return }
+        model.ensureSelectedForDrag(itemID)
+        let selected = model.selectedItemsInOrder()
+
+        var dragItems: [NSDraggingItem] = []
+        var successfulIDs: [ShelfItem.ID] = []
+        var missingIDs: [ShelfItem.ID] = []
+        let dragSize: CGFloat = 48
+        let clickLocation = convert(event.locationInWindow, from: nil)
+
+        for (index, shelfItem) in selected.enumerated() {
+            guard let url = model.resolveURL(for: shelfItem.id) else {
+                missingIDs.append(shelfItem.id)
+                continue
+            }
+            let image: NSImage = {
+                if shelfItem.id == itemID, let dragImage, let copy = dragImage.copy() as? NSImage {
+                    copy.size = NSSize(width: dragSize, height: dragSize)
+                    return copy
+                }
+                let icon = NSWorkspace.shared.icon(forFile: url.path)
+                icon.size = NSSize(width: dragSize, height: dragSize)
+                return icon
+            }()
+            let draggingItem = NSDraggingItem(pasteboardWriter: url as NSURL)
+            // Offset secondary items to suggest a stack behind the primary.
+            let offset: CGFloat = shelfItem.id == itemID ? 0 : CGFloat(index) * 4
+            draggingItem.setDraggingFrame(
+                NSRect(
+                    x: clickLocation.x - dragSize / 2 + offset,
+                    y: clickLocation.y - dragSize / 2 - offset,
+                    width: dragSize,
+                    height: dragSize
+                ),
+                contents: image
+            )
+            dragItems.append(draggingItem)
+            successfulIDs.append(shelfItem.id)
+        }
+
+        if !missingIDs.isEmpty {
+            model.remove(ids: missingIDs)
+        }
+
+        guard !dragItems.isEmpty else {
             NSAnimationEffect.poof.show(
                 centeredAt: NSEvent.mouseLocation,
                 size: NSSize(width: 32, height: 32)
             )
-            onMissing()
             onDragEnded()
             return
         }
-        let dragSize: CGFloat = 48
-        let image: NSImage = {
-            if let dragImage, let copy = dragImage.copy() as? NSImage {
-                copy.size = NSSize(width: dragSize, height: dragSize)
-                return copy
-            }
-            let icon = NSWorkspace.shared.icon(forFile: url.path)
-            icon.size = NSSize(width: dragSize, height: dragSize)
-            return icon
-        }()
-        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
-        let location = convert(event.locationInWindow, from: nil)
-        item.setDraggingFrame(
-            NSRect(
-                x: location.x - dragSize / 2,
-                y: location.y - dragSize / 2,
-                width: dragSize,
-                height: dragSize
-            ),
-            contents: image
-        )
+
+        draggedIDs = successfulIDs
         cursorInsideShelf = true
-        beginDraggingSession(with: [item], event: event, source: self)
+        beginDraggingSession(with: dragItems, event: event, source: self)
     }
 
     func draggingSession(
@@ -393,8 +450,9 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
         operation: NSDragOperation
     ) {
         if operation == .move || droppedOnFinderWindow(at: screenPoint) {
-            onMoved()
+            model?.remove(ids: draggedIDs)
         }
+        draggedIDs = []
         onDragEnded()
     }
 
