@@ -14,6 +14,11 @@
 		D005000000000000000000A5 /* ShelfModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C005000000000000000000A5 /* ShelfModel.swift */; };
 		D006000000000000000000A6 /* ShelfView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C006000000000000000000A6 /* ShelfView.swift */; };
 		D007000000000000000000A7 /* DragMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C007000000000000000000A7 /* DragMonitor.swift */; };
+		D008000000000000000000A8 /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = C008000000000000000000A8 /* Logging.swift */; };
+		D009000000000000000000A9 /* ShelfPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = C009000000000000000000A9 /* ShelfPreferences.swift */; };
+		D00A000000000000000000AA /* ShelfIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00A000000000000000000AA /* ShelfIcon.swift */; };
+		D00B000000000000000000AB /* DragDropBridges.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00B000000000000000000AB /* DragDropBridges.swift */; };
+		D00C000000000000000000AC /* QuickLookCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00C000000000000000000AC /* QuickLookCoordinator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -25,6 +30,11 @@
 		C005000000000000000000A5 /* ShelfModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfModel.swift; sourceTree = "<group>"; };
 		C006000000000000000000A6 /* ShelfView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfView.swift; sourceTree = "<group>"; };
 		C007000000000000000000A7 /* DragMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DragMonitor.swift; sourceTree = "<group>"; };
+		C008000000000000000000A8 /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
+		C009000000000000000000A9 /* ShelfPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfPreferences.swift; sourceTree = "<group>"; };
+		C00A000000000000000000AA /* ShelfIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfIcon.swift; sourceTree = "<group>"; };
+		C00B000000000000000000AB /* DragDropBridges.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DragDropBridges.swift; sourceTree = "<group>"; };
+		C00C000000000000000000AC /* QuickLookCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLookCoordinator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -55,7 +65,12 @@
 				C004000000000000000000A4 /* ShelfPanel.swift */,
 				C005000000000000000000A5 /* ShelfModel.swift */,
 				C006000000000000000000A6 /* ShelfView.swift */,
+				C00A000000000000000000AA /* ShelfIcon.swift */,
+				C00B000000000000000000AB /* DragDropBridges.swift */,
+				C00C000000000000000000AC /* QuickLookCoordinator.swift */,
 				C007000000000000000000A7 /* DragMonitor.swift */,
+				C009000000000000000000A9 /* ShelfPreferences.swift */,
+				C008000000000000000000A8 /* Logging.swift */,
 			);
 			path = Nab;
 			sourceTree = "<group>";
@@ -165,7 +180,12 @@
 				D004000000000000000000A4 /* ShelfPanel.swift in Sources */,
 				D005000000000000000000A5 /* ShelfModel.swift in Sources */,
 				D006000000000000000000A6 /* ShelfView.swift in Sources */,
+				D00A000000000000000000AA /* ShelfIcon.swift in Sources */,
+				D00B000000000000000000AB /* DragDropBridges.swift in Sources */,
+				D00C000000000000000000AC /* QuickLookCoordinator.swift in Sources */,
 				D007000000000000000000A7 /* DragMonitor.swift in Sources */,
+				D009000000000000000000A9 /* ShelfPreferences.swift in Sources */,
+				D008000000000000000000A8 /* Logging.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
