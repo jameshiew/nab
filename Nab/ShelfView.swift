@@ -279,9 +279,30 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
         endedAt screenPoint: NSPoint,
         operation: NSDragOperation
     ) {
-        if operation == .move {
+        if operation == .move || droppedOnFinderWindow(at: screenPoint) {
             onMoved()
         }
         onDragEnded()
+    }
+
+    /// Finder rejects same-folder drops with `.none`, so a `.none` result over a
+    /// Finder window implies the user dragged the file back where it came from;
+    /// treat that as a logical move and clear the shelf entry.
+    private func droppedOnFinderWindow(at screenPoint: NSPoint) -> Bool {
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let infos = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]],
+              let primary = NSScreen.screens.first else { return false }
+        let cgY = primary.frame.maxY - screenPoint.y
+        for info in infos {
+            guard (info[kCGWindowLayer as String] as? Int) == 0,
+                  let bounds = info[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
+            let x = bounds["X"] ?? 0
+            let y = bounds["Y"] ?? 0
+            let w = bounds["Width"] ?? 0
+            let h = bounds["Height"] ?? 0
+            guard screenPoint.x >= x, screenPoint.x <= x + w, cgY >= y, cgY <= y + h else { continue }
+            return (info[kCGWindowOwnerName as String] as? String) == "Finder"
+        }
+        return false
     }
 }
