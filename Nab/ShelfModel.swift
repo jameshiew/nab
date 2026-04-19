@@ -11,9 +11,22 @@ struct ShelfItem: Identifiable, Hashable {
 final class ShelfModel {
     var items: [ShelfItem] = []
 
-    func add(_ urls: [URL]) {
-        let new = urls.map { ShelfItem(url: $0) }
-        items.append(contentsOf: new)
+    /// Adds URLs not already on the shelf. Returns how many were added vs. rejected as duplicates.
+    @discardableResult
+    func add(_ urls: [URL]) -> (added: Int, duplicates: Int) {
+        var existing = Set(items.map(\.url.standardizedFileURL))
+        var added = 0
+        var duplicates = 0
+        for url in urls {
+            let key = url.standardizedFileURL
+            if existing.insert(key).inserted {
+                items.append(ShelfItem(url: url))
+                added += 1
+            } else {
+                duplicates += 1
+            }
+        }
+        return (added, duplicates)
     }
 
     func remove(_ id: ShelfItem.ID) {

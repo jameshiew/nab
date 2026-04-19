@@ -17,13 +17,23 @@ struct ShelfView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(.white.opacity(0.08), lineWidth: 0.5)
         )
-        .dropDestination(for: URL.self) { urls, _ in
-            let files = urls.filter { $0.isFileURL }
-            guard !files.isEmpty else { return false }
-            model.add(files)
-            onDropReceived()
-            return true
+        .dropDestination(for: URL.self) { (urls: [URL], _) -> Bool in
+            handleDrop(urls: urls)
         }
+    }
+
+    private func handleDrop(urls: [URL]) -> Bool {
+        let files = urls.filter { $0.isFileURL }
+        guard !files.isEmpty else { return false }
+        let result = model.add(files)
+        if result.added == 0 && result.duplicates > 0 {
+            NSAnimationEffect.poof.show(
+                centeredAt: NSEvent.mouseLocation,
+                size: NSSize(width: 32, height: 32)
+            )
+        }
+        onDropReceived()
+        return true
     }
 
     private var header: some View {
