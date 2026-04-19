@@ -15,12 +15,14 @@ final class ShelfController {
     private let dragMonitor = DragMonitor()
     private var hideTask: Task<Void, Never>?
     private var inDrag = false
+    private var cursorInsideShelf = false
 
     private static let emptyHideDelay: Duration = .milliseconds(400)
 
     func start() {
         dragMonitor.dragStarted = { [weak self] in self?.onDragStarted() }
         dragMonitor.dragEnded = { [weak self] in self?.onDragEnded() }
+        dragMonitor.dragMoved = { [weak self] point in self?.onDragMoved(at: point) }
         dragMonitor.start()
         _ = panel
         observeEmptyState()
@@ -40,6 +42,7 @@ final class ShelfController {
 
     private func onDragStarted() {
         inDrag = true
+        cursorInsideShelf = panel.visibleFrame.contains(NSEvent.mouseLocation)
         cancelHide()
         panel.slideIn()
     }
@@ -47,6 +50,13 @@ final class ShelfController {
     private func onDragEnded() {
         inDrag = false
         updateHideSchedule()
+    }
+
+    private func onDragMoved(at point: NSPoint) {
+        let inside = panel.visibleFrame.contains(point)
+        guard inside != cursorInsideShelf else { return }
+        cursorInsideShelf = inside
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
 
     private func handleDrop() {

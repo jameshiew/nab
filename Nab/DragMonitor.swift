@@ -5,6 +5,7 @@ import AppKit
 final class DragMonitor {
     var dragStarted: () -> Void = {}
     var dragEnded: () -> Void = {}
+    var dragMoved: (NSPoint) -> Void = { _ in }
 
     private let pasteboard = NSPasteboard(name: .drag)
     private var baselineChangeCount: Int
@@ -51,7 +52,10 @@ final class DragMonitor {
     }
 
     private func handleDrag() {
-        if inDrag { return }
+        if inDrag {
+            dragMoved(NSEvent.mouseLocation)
+            return
+        }
         let now = ProcessInfo.processInfo.systemUptime
         if now - lastPoll < Self.pollInterval { return }
         lastPoll = now
@@ -64,6 +68,7 @@ final class DragMonitor {
 
         inDrag = true
         dragStarted()
+        dragMoved(NSEvent.mouseLocation)
     }
 
     private func handleUp() {

@@ -282,6 +282,7 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
     weak var hostingView: NSView?
 
     private var mouseDownLocation: NSPoint?
+    private var cursorInsideShelf = true
     private static let dragThreshold: CGFloat = 3
 
     override var intrinsicContentSize: NSSize {
@@ -336,6 +337,7 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
             ),
             contents: image
         )
+        cursorInsideShelf = true
         beginDraggingSession(with: [item], event: event, source: self)
     }
 
@@ -344,6 +346,17 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
         sourceOperationMaskFor context: NSDraggingContext
     ) -> NSDragOperation {
         [.move, .copy]
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        movedTo screenPoint: NSPoint
+    ) {
+        guard let shelfFrame = window?.frame else { return }
+        let inside = shelfFrame.contains(screenPoint)
+        guard inside != cursorInsideShelf else { return }
+        cursorInsideShelf = inside
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
 
     func draggingSession(
