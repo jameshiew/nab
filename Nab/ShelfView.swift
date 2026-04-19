@@ -9,8 +9,6 @@ struct ShelfView: View {
     var onItemDragEnded: () -> Void = {}
     var onHeaderDragEnded: () -> Void = {}
 
-    private static let acceptedTypes: [UTType] = [.fileURL, .image]
-
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -23,92 +21,19 @@ struct ShelfView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(.white.opacity(0.08), lineWidth: 0.5)
         )
-        .onDrop(of: Self.acceptedTypes, isTargeted: nil) { providers in
-            handleDrop(providers: providers)
-        }
+        .background(ShelfDropTarget(onDrop: handleDrop))
     }
 
-    private func handleDrop(providers: [NSItemProvider]) -> Bool {
-        guard !providers.isEmpty else { return false }
-        Task { @MainActor in
-            var urls: [URL] = []
-            for provider in providers {
-                if let url = await ShelfView.extractURL(from: provider) {
-                    urls.append(url)
-                }
-            }
-            guard !urls.isEmpty else { return }
-            let result = model.add(urls)
-            if result.added == 0 && result.duplicates > 0 {
-                NSAnimationEffect.poof.show(
-                    centeredAt: NSEvent.mouseLocation,
-                    size: NSSize(width: 32, height: 32)
-                )
-            }
-            onDropReceived()
+    private func handleDrop(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        let result = model.add(urls)
+        if result.added == 0 && result.duplicates > 0 {
+            NSAnimationEffect.poof.show(
+                centeredAt: NSEvent.mouseLocation,
+                size: NSSize(width: 32, height: 32)
+            )
         }
-        return true
-    }
-
-    private static func extractURL(from provider: NSItemProvider) async -> URL? {
-        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
-            let url = await loadFileURL(from: provider),
-            FileManager.default.fileExists(atPath: url.path)
-        {
-            return url
-        }
-        let imageTypes: [(UTType, String)] = [
-            (.png, "png"),
-            (.jpeg, "jpg"),
-            (.heic, "heic"),
-            (.tiff, "tiff"),
-            (.gif, "gif"),
-        ]
-        for (type, ext) in imageTypes
-        where provider.hasItemConformingToTypeIdentifier(type.identifier) {
-            if let data = await loadData(from: provider, typeID: type.identifier),
-                let url = saveDroppedImage(data: data, ext: ext)
-            {
-                return url
-            }
-        }
-        return nil
-    }
-
-    private static func loadFileURL(from provider: NSItemProvider) async -> URL? {
-        await withCheckedContinuation { (cont: CheckedContinuation<URL?, Never>) in
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                let url: URL? = {
-                    if let u = item as? URL { return u }
-                    if let data = item as? Data { return URL(dataRepresentation: data, relativeTo: nil) }
-                    if let s = item as? String { return URL(string: s) }
-                    return nil
-                }()
-                cont.resume(returning: (url?.isFileURL == true) ? url : nil)
-            }
-        }
-    }
-
-    private static func loadData(from provider: NSItemProvider, typeID: String) async -> Data? {
-        await withCheckedContinuation { (cont: CheckedContinuation<Data?, Never>) in
-            provider.loadDataRepresentation(forTypeIdentifier: typeID) { data, _ in
-                cont.resume(returning: data)
-            }
-        }
-    }
-
-    private static func saveDroppedImage(data: Data, ext: String) -> URL? {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
-        let filename = "Screenshot \(formatter.string(from: Date())).\(ext)"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-        do {
-            try data.write(to: url, options: .atomic)
-            return url
-        } catch {
-            return nil
-        }
+        onDropReceived()
     }
 
     private var header: some View {
@@ -422,11 +347,13 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
     private func droppedOnFinderWindow(at screenPoint: NSPoint) -> Bool {
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         guard let infos = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]],
-              let primary = NSScreen.screens.first else { return false }
+            let primary = NSScreen.screens.first
+        else { return false }
         let cgY = primary.frame.maxY - screenPoint.y
         for info in infos {
             guard (info[kCGWindowLayer as String] as? Int) == 0,
-                  let bounds = info[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
+                let bounds = info[kCGWindowBounds as String] as? [String: CGFloat]
+            else { continue }
             let x = bounds["X"] ?? 0
             let y = bounds["Y"] ?? 0
             let w = bounds["Width"] ?? 0
@@ -435,5 +362,96 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
             return (info[kCGWindowOwnerName as String] as? String) == "Finder"
         }
         return false
+    }
+}
+
+/// NSView-based drop target. Reads the raw drag pasteboard so we can see
+/// `public.file-url` even when a dragged item also exposes image data — SwiftUI's
+/// `.onDrop(of:)` filters the NSItemProvider to the most specific accepted type
+/// and strips the file URL for items like PNG files from Finder.
+private struct ShelfDropTarget: NSViewRepresentable {
+    let onDrop: ([URL]) -> Void
+
+    func makeNSView(context: Context) -> DropView {
+        let view = DropView()
+        view.onDrop = onDrop
+        return view
+    }
+
+    func updateNSView(_ nsView: DropView, context: Context) {
+        nsView.onDrop = onDrop
+    }
+
+    final class DropView: NSView {
+        var onDrop: ([URL]) -> Void = { _ in }
+
+        private static let imageTypes: [(NSPasteboard.PasteboardType, String)] = [
+            (NSPasteboard.PasteboardType(UTType.png.identifier), "png"),
+            (NSPasteboard.PasteboardType(UTType.jpeg.identifier), "jpg"),
+            (NSPasteboard.PasteboardType(UTType.heic.identifier), "heic"),
+            (NSPasteboard.PasteboardType(UTType.tiff.identifier), "tiff"),
+            (NSPasteboard.PasteboardType(UTType.gif.identifier), "gif"),
+        ]
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            var types: [NSPasteboard.PasteboardType] = [.fileURL]
+            types.append(contentsOf: Self.imageTypes.map(\.0))
+            registerForDraggedTypes(types)
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+        override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
+
+        override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
+
+        override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { true }
+
+        override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            let pasteboard = sender.draggingPasteboard
+            var urls: [URL] = []
+
+            // Prefer file URLs when present — covers Finder drags of any file type.
+            let fileOptions: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+            if let fileURLs = pasteboard.readObjects(
+                forClasses: [NSURL.self],
+                options: fileOptions
+            ) as? [URL] {
+                urls.append(contentsOf: fileURLs.filter { FileManager.default.fileExists(atPath: $0.path) })
+            }
+
+            // Fall back to image data — covers ad hoc screenshots (Cmd+Shift+4 thumbnail)
+            // and dragged images that expose no file URL on the pasteboard.
+            if urls.isEmpty {
+                for item in pasteboard.pasteboardItems ?? [] {
+                    for (type, ext) in Self.imageTypes where item.types.contains(type) {
+                        guard let data = item.data(forType: type),
+                            let url = Self.saveScreenshot(data: data, ext: ext)
+                        else { continue }
+                        urls.append(url)
+                        break
+                    }
+                }
+            }
+
+            guard !urls.isEmpty else { return false }
+            onDrop(urls)
+            return true
+        }
+
+        private static func saveScreenshot(data: Data, ext: String) -> URL? {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
+            let filename = "Screenshot \(formatter.string(from: Date())).\(ext)"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            do {
+                try data.write(to: url, options: .atomic)
+                return url
+            } catch {
+                return nil
+            }
+        }
     }
 }
