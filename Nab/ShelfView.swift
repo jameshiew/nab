@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import QuickLookThumbnailing
 
 struct ShelfView: View {
     @Bindable var model: ShelfModel
@@ -72,9 +73,13 @@ struct ShelfView: View {
             .padding()
         } else {
             ScrollView {
-                LazyVStack(spacing: 4) {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 60), spacing: 8)],
+                    alignment: .center,
+                    spacing: 8
+                ) {
                     ForEach(model.items) { item in
-                        ShelfRow(
+                        ShelfIcon(
                             item: item,
                             onRemove: { model.remove(item.id) },
                             onDragEnded: onItemDragEnded
@@ -87,50 +92,77 @@ struct ShelfView: View {
     }
 }
 
-private struct ShelfRow: View {
+private struct ShelfIcon: View {
     let item: ShelfItem
     let onRemove: () -> Void
     let onDragEnded: () -> Void
     @State private var hovering = false
+    @State private var thumbnail: NSImage?
+
+    private static let iconSize: CGFloat = 48
 
     var body: some View {
-        HStack(spacing: 8) {
-            FileDragSource(url: item.url, onMoved: onRemove, onDragEnded: onDragEnded) {
-                HStack(spacing: 8) {
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path))
+        VStack(spacing: 4) {
+            ZStack(alignment: .topTrailing) {
+                FileDragSource(
+                    url: item.url,
+                    dragImage: thumbnail,
+                    onMoved: onRemove,
+                    onDragEnded: onDragEnded
+                ) {
+                    Image(nsImage: thumbnail ?? NSWorkspace.shared.icon(forFile: item.url.path))
                         .resizable()
-                        .frame(width: 28, height: 28)
-                    Text(item.displayName)
-                        .font(.system(size: 12))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: Self.iconSize, height: Self.iconSize)
                 }
-                .contentShape(Rectangle())
-            }
-            if hovering {
-                Button(action: onRemove) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
+                if hovering {
+                    Button(action: onRemove) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, .black.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove")
+                    .offset(x: 4, y: -4)
                 }
-                .buttonStyle(.borderless)
-                .help("Remove")
             }
+            Text(item.displayName)
+                .font(.system(size: 10))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(4)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(hovering ? .white.opacity(0.08) : .clear)
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+        .task(id: item.id) {
+            await loadThumbnail()
+        }
+    }
+
+    private func loadThumbnail() async {
+        let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+        let request = QLThumbnailGenerator.Request(
+            fileAt: item.url,
+            size: CGSize(width: Self.iconSize, height: Self.iconSize),
+            scale: scale,
+            representationTypes: .thumbnail
+        )
+        if let rep = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request) {
+            thumbnail = rep.nsImage
+        }
     }
 }
 
 private struct FileDragSource<Content: View>: NSViewRepresentable {
     let url: URL
+    let dragImage: NSImage?
     let onMoved: () -> Void
     let onDragEnded: () -> Void
     @ViewBuilder let content: () -> Content
@@ -140,6 +172,7 @@ private struct FileDragSource<Content: View>: NSViewRepresentable {
         host.translatesAutoresizingMaskIntoConstraints = false
         let view = FileDragSourceView()
         view.url = url
+        view.dragImage = dragImage
         view.onMoved = onMoved
         view.onDragEnded = onDragEnded
         view.addSubview(host)
@@ -155,6 +188,7 @@ private struct FileDragSource<Content: View>: NSViewRepresentable {
 
     func updateNSView(_ nsView: FileDragSourceView, context: Context) {
         nsView.url = url
+        nsView.dragImage = dragImage
         nsView.onMoved = onMoved
         nsView.onDragEnded = onDragEnded
         (nsView.hostingView as? NSHostingView<Content>)?.rootView = content()
@@ -163,6 +197,7 @@ private struct FileDragSource<Content: View>: NSViewRepresentable {
 
 private final class FileDragSourceView: NSView, NSDraggingSource {
     var url: URL = URL(fileURLWithPath: "/")
+    var dragImage: NSImage?
     var onMoved: () -> Void = {}
     var onDragEnded: () -> Void = {}
     weak var hostingView: NSView?
@@ -192,19 +227,26 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
     }
 
     private func startDrag(with event: NSEvent) {
-        let iconSize: CGFloat = 32
-        let icon = NSWorkspace.shared.icon(forFile: url.path)
-        icon.size = NSSize(width: iconSize, height: iconSize)
+        let dragSize: CGFloat = 48
+        let image: NSImage = {
+            if let dragImage, let copy = dragImage.copy() as? NSImage {
+                copy.size = NSSize(width: dragSize, height: dragSize)
+                return copy
+            }
+            let icon = NSWorkspace.shared.icon(forFile: url.path)
+            icon.size = NSSize(width: dragSize, height: dragSize)
+            return icon
+        }()
         let item = NSDraggingItem(pasteboardWriter: url as NSURL)
         let location = convert(event.locationInWindow, from: nil)
         item.setDraggingFrame(
             NSRect(
-                x: location.x - iconSize / 2,
-                y: location.y - iconSize / 2,
-                width: iconSize,
-                height: iconSize
+                x: location.x - dragSize / 2,
+                y: location.y - dragSize / 2,
+                width: dragSize,
+                height: dragSize
             ),
-            contents: icon
+            contents: image
         )
         beginDraggingSession(with: [item], event: event, source: self)
     }
