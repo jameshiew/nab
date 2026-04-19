@@ -1,0 +1,285 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		D001000000000000000000A1 /* NabApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C001000000000000000000A1 /* NabApp.swift */; };
+		D002000000000000000000A2 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C002000000000000000000A2 /* AppDelegate.swift */; };
+		D003000000000000000000A3 /* ShelfController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C003000000000000000000A3 /* ShelfController.swift */; };
+		D004000000000000000000A4 /* ShelfPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C004000000000000000000A4 /* ShelfPanel.swift */; };
+		D005000000000000000000A5 /* ShelfModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C005000000000000000000A5 /* ShelfModel.swift */; };
+		D006000000000000000000A6 /* ShelfView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C006000000000000000000A6 /* ShelfView.swift */; };
+		D007000000000000000000A7 /* DragMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C007000000000000000000A7 /* DragMonitor.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		AF00000000000000000000FF /* Nab.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Nab.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C001000000000000000000A1 /* NabApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NabApp.swift; sourceTree = "<group>"; };
+		C002000000000000000000A2 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		C003000000000000000000A3 /* ShelfController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfController.swift; sourceTree = "<group>"; };
+		C004000000000000000000A4 /* ShelfPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfPanel.swift; sourceTree = "<group>"; };
+		C005000000000000000000A5 /* ShelfModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfModel.swift; sourceTree = "<group>"; };
+		C006000000000000000000A6 /* ShelfView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfView.swift; sourceTree = "<group>"; };
+		C007000000000000000000A7 /* DragMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DragMonitor.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B100000000000000000000B1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		AB00000000000000000000AB /* Root */ = {
+			isa = PBXGroup;
+			children = (
+				AC00000000000000000000AC /* Nab */,
+				AD00000000000000000000AD /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		AC00000000000000000000AC /* Nab */ = {
+			isa = PBXGroup;
+			children = (
+				C001000000000000000000A1 /* NabApp.swift */,
+				C002000000000000000000A2 /* AppDelegate.swift */,
+				C003000000000000000000A3 /* ShelfController.swift */,
+				C004000000000000000000A4 /* ShelfPanel.swift */,
+				C005000000000000000000A5 /* ShelfModel.swift */,
+				C006000000000000000000A6 /* ShelfView.swift */,
+				C007000000000000000000A7 /* DragMonitor.swift */,
+			);
+			path = Nab;
+			sourceTree = "<group>";
+		};
+		AD00000000000000000000AD /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				AF00000000000000000000FF /* Nab.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		AE00000000000000000000AE /* Nab */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B400000000000000000000B4 /* Build configuration list for PBXNativeTarget "Nab" */;
+			buildPhases = (
+				B500000000000000000000B5 /* Lint */,
+				B000000000000000000000B0 /* Sources */,
+				B100000000000000000000B1 /* Frameworks */,
+				B200000000000000000000B2 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Nab;
+			productName = Nab;
+			productReference = AF00000000000000000000FF /* Nab.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		AA00000000000000000000AA /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2640;
+				LastUpgradeCheck = 2640;
+				TargetAttributes = {
+					AE00000000000000000000AE = {
+						CreatedOnToolsVersion = 26.4;
+					};
+				};
+			};
+			buildConfigurationList = B300000000000000000000B3 /* Build configuration list for PBXProject "Nab" */;
+			compatibilityVersion = "Xcode 16.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = AB00000000000000000000AB;
+			productRefGroup = AD00000000000000000000AD /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AE00000000000000000000AE /* Nab */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		B500000000000000000000B5 /* Lint */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = Lint;
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "xcrun swift-format lint -r \"${SRCROOT}/Nab\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B200000000000000000000B2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		B000000000000000000000B0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D001000000000000000000A1 /* NabApp.swift in Sources */,
+				D002000000000000000000A2 /* AppDelegate.swift in Sources */,
+				D003000000000000000000A3 /* ShelfController.swift in Sources */,
+				D004000000000000000000A4 /* ShelfPanel.swift in Sources */,
+				D005000000000000000000A5 /* ShelfModel.swift in Sources */,
+				D006000000000000000000A6 /* ShelfView.swift in Sources */,
+				D007000000000000000000A7 /* DragMonitor.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		E000000000000000000000E0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		E100000000000000000000E1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		E200000000000000000000E2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.nab.Nab";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		E300000000000000000000E3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.nab.Nab";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B300000000000000000000B3 /* Build configuration list for PBXProject "Nab" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E000000000000000000000E0 /* Debug */,
+				E100000000000000000000E1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B400000000000000000000B4 /* Build configuration list for PBXNativeTarget "Nab" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E200000000000000000000E2 /* Debug */,
+				E300000000000000000000E3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = AA00000000000000000000AA /* Project object */;
+}
