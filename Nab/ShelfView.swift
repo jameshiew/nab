@@ -261,6 +261,17 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
     }
 
     override func mouseDown(with event: NSEvent) {
+        NabLog.write("FileDragSource mouseDown clickCount=\(event.clickCount)")
+        if event.clickCount == 2 {
+            mouseDownLocation = nil
+            guard let url = resolveURL() else {
+                onMissing()
+                return
+            }
+            NabLog.write("FileDragSource opening \(url.path)")
+            NSWorkspace.shared.open(url)
+            return
+        }
         mouseDownLocation = event.locationInWindow
     }
 
@@ -274,6 +285,7 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
     }
 
     override func mouseUp(with event: NSEvent) {
+        NabLog.write("FileDragSource mouseUp clickCount=\(event.clickCount)")
         mouseDownLocation = nil
     }
 
