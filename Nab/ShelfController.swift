@@ -8,7 +8,8 @@ final class ShelfController {
         let view = ShelfView(
             model: model,
             onDropReceived: { [weak self] in self?.handleDrop() },
-            onItemDragEnded: { [weak self] in self?.dragMonitor.endOwnDrag() }
+            onItemDragEnded: { [weak self] in self?.dragMonitor.endOwnDrag() },
+            onHeaderDragEnded: { [weak self] in self?.panel.userDidFinishDragging() }
         )
         return ShelfPanel(rootView: view)
     }()

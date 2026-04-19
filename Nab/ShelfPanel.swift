@@ -17,6 +17,7 @@ final class ShelfPanel: NSPanel {
 
     private(set) var currentHeight: CGFloat = baseHeight
     private var isShown = false
+    private var customTopLeft: CGPoint?
 
     var size: CGSize { CGSize(width: Self.width, height: currentHeight) }
 
@@ -38,6 +39,8 @@ final class ShelfPanel: NSPanel {
         isOpaque = false
         hasShadow = true
 
+        customTopLeft = ShelfPreferences.loadTopLeft()
+
         let host = NSHostingView(rootView: rootView)
         host.translatesAutoresizingMaskIntoConstraints = false
         contentView = NSView()
@@ -53,12 +56,37 @@ final class ShelfPanel: NSPanel {
 
         setFrame(hiddenFrame, display: false)
         orderFrontRegardless()
+
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: self,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                NabLog.write("windowDidMove frame=\(self.frame)")
+            }
+        }
     }
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
     var visibleFrame: NSRect {
+        if let top = customTopLeft {
+            let proposed = NSRect(
+                x: top.x,
+                y: top.y - size.height,
+                width: size.width,
+                height: size.height
+            )
+            if Self.screenContaining(proposed) != nil {
+                return proposed
+            }
+            NabLog.write("visibleFrame custom OFF-SCREEN top=\(top) proposed=\(proposed)")
+        } else {
+            NabLog.write("visibleFrame DEFAULT (customTopLeft=nil)")
+        }
         let screen = NSScreen.main?.visibleFrame ?? .zero
         let x = screen.maxX - size.width - Self.edgeInset
         let y = screen.midY - size.height / 2
@@ -66,8 +94,8 @@ final class ShelfPanel: NSPanel {
     }
 
     var hiddenFrame: NSRect {
-        let screen = NSScreen.main?.frame ?? .zero
         let visible = visibleFrame
+        let screen = Self.screenContaining(visible) ?? (NSScreen.main?.frame ?? .zero)
         return NSRect(
             x: screen.maxX + Self.edgeInset,
             y: visible.origin.y,
@@ -76,14 +104,33 @@ final class ShelfPanel: NSPanel {
         )
     }
 
+    func userDidFinishDragging() {
+        let topLeft = CGPoint(x: frame.minX, y: frame.maxY)
+        NabLog.write("userDidFinishDragging saving top=\(topLeft) frame=\(frame)")
+        customTopLeft = topLeft
+        ShelfPreferences.saveTopLeft(topLeft)
+    }
+
+    private static func screenContaining(_ point: CGPoint) -> NSScreen? {
+        NSScreen.screens.first { $0.frame.contains(point) }
+    }
+
+    private static func screenContaining(_ rect: NSRect) -> CGRect? {
+        NSScreen.screens.first { $0.frame.intersects(rect) }?.frame
+    }
+
     func slideIn() {
+        let target = visibleFrame
+        NabLog.write("slideIn target=\(target) customTopLeft=\(String(describing: customTopLeft))")
         isShown = true
-        animate(to: visibleFrame)
+        animate(to: target)
     }
 
     func slideOut() {
+        let target = hiddenFrame
+        NabLog.write("slideOut target=\(target) customTopLeft=\(String(describing: customTopLeft))")
         isShown = false
-        animate(to: hiddenFrame)
+        animate(to: target)
     }
 
     func updateHeight(forItemCount count: Int) {
@@ -110,6 +157,46 @@ final class ShelfPanel: NSPanel {
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             ctx.allowsImplicitAnimation = true
             self.animator().setFrame(frame, display: true)
+        }
+    }
+}
+
+private enum ShelfPreferences {
+    private static let topLeftXKey = "shelfTopLeftX"
+    private static let topLeftYKey = "shelfTopLeftY"
+
+    static func loadTopLeft() -> CGPoint? {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: topLeftXKey) != nil,
+            defaults.object(forKey: topLeftYKey) != nil
+        else { return nil }
+        return CGPoint(
+            x: defaults.double(forKey: topLeftXKey),
+            y: defaults.double(forKey: topLeftYKey)
+        )
+    }
+
+    static func saveTopLeft(_ point: CGPoint) {
+        let defaults = UserDefaults.standard
+        defaults.set(point.x, forKey: topLeftXKey)
+        defaults.set(point.y, forKey: topLeftYKey)
+    }
+}
+
+enum NabLog {
+    nonisolated static func write(_ message: String) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        let line = "\(formatter.string(from: Date())) \(message)\n"
+        let path = "/tmp/nab-debug.log"
+        if let data = line.data(using: .utf8) {
+            if let fh = FileHandle(forWritingAtPath: path) {
+                fh.seekToEndOfFile()
+                fh.write(data)
+                try? fh.close()
+            } else {
+                try? data.write(to: URL(fileURLWithPath: path))
+            }
         }
     }
 }

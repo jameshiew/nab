@@ -7,6 +7,7 @@ struct ShelfView: View {
     @Bindable var model: ShelfModel
     var onDropReceived: () -> Void = {}
     var onItemDragEnded: () -> Void = {}
+    var onHeaderDragEnded: () -> Void = {}
 
     private static let acceptedTypes: [UTType] = [.fileURL, .image]
 
@@ -115,6 +116,7 @@ struct ShelfView: View {
             Text("Nab")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
+                .allowsHitTesting(false)
             Spacer()
             if !model.items.isEmpty {
                 Button(action: model.clear) {
@@ -128,6 +130,7 @@ struct ShelfView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+        .background(WindowDragHandle(onDragEnded: onHeaderDragEnded))
     }
 
     @ViewBuilder
@@ -228,6 +231,52 @@ private struct ShelfIcon: View {
         )
         if let rep = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request) {
             thumbnail = rep.nsImage
+        }
+    }
+}
+
+private struct WindowDragHandle: NSViewRepresentable {
+    let onDragEnded: () -> Void
+
+    func makeNSView(context: Context) -> DragHandleView {
+        let view = DragHandleView()
+        view.onDragEnded = onDragEnded
+        return view
+    }
+
+    func updateNSView(_ nsView: DragHandleView, context: Context) {
+        nsView.onDragEnded = onDragEnded
+    }
+
+    final class DragHandleView: NSView {
+        var onDragEnded: () -> Void = {}
+        private var startMouse: NSPoint?
+        private var startOrigin: NSPoint?
+        private var didDrag = false
+
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func mouseDown(with event: NSEvent) {
+            guard let window else { return }
+            startMouse = NSEvent.mouseLocation
+            startOrigin = window.frame.origin
+            didDrag = false
+            NabLog.write("mouseDown origin=\(window.frame.origin)")
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let window, let sm = startMouse, let so = startOrigin else { return }
+            let m = NSEvent.mouseLocation
+            window.setFrameOrigin(NSPoint(x: so.x + m.x - sm.x, y: so.y + m.y - sm.y))
+            didDrag = true
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            NabLog.write("mouseUp didDrag=\(didDrag) origin=\(window?.frame.origin ?? .zero)")
+            if didDrag { onDragEnded() }
+            startMouse = nil
+            startOrigin = nil
+            didDrag = false
         }
     }
 }
