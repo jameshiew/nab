@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import QuickLookThumbnailing
+import QuickLookUI
 import UniformTypeIdentifiers
 
 struct ShelfView: View {
@@ -102,19 +103,33 @@ private struct ShelfIcon: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            ZStack(alignment: .topTrailing) {
-                FileDragSource(
-                    resolveURL: resolveURL,
-                    dragImage: thumbnail,
-                    onMoved: onRemove,
-                    onMissing: onRemove,
-                    onDragEnded: onDragEnded
-                ) {
-                    Image(nsImage: thumbnail ?? NSWorkspace.shared.icon(forFile: item.url.path))
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: Self.iconSize, height: Self.iconSize)
+            FileDragSource(
+                resolveURL: resolveURL,
+                dragImage: thumbnail,
+                onMoved: onRemove,
+                onMissing: onRemove,
+                onDragEnded: onDragEnded,
+                onQuickLook: quickLook
+            ) {
+                Image(nsImage: thumbnail ?? NSWorkspace.shared.icon(forFile: item.url.path))
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: Self.iconSize, height: Self.iconSize)
+            }
+            .overlay(alignment: .topLeading) {
+                if hovering {
+                    Button(action: quickLook) {
+                        Image(systemName: "eye.circle.fill")
+                            .font(.system(size: 14))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, .black.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Quick Look")
+                    .offset(x: -4, y: -4)
                 }
+            }
+            .overlay(alignment: .topTrailing) {
                 if hovering {
                     Button(action: onRemove) {
                         Image(systemName: "xmark.circle.fill")
@@ -144,6 +159,14 @@ private struct ShelfIcon: View {
         .task(id: item.url) {
             await loadThumbnail()
         }
+    }
+
+    private func quickLook() {
+        guard let url = resolveURL() else {
+            onRemove()
+            return
+        }
+        QuickLookCoordinator.shared.preview(url: url)
     }
 
     private func loadThumbnail() async {
@@ -212,6 +235,7 @@ private struct FileDragSource<Content: View>: NSViewRepresentable {
     let onMoved: () -> Void
     let onMissing: () -> Void
     let onDragEnded: () -> Void
+    let onQuickLook: () -> Void
     @ViewBuilder let content: () -> Content
 
     func makeNSView(context: Context) -> FileDragSourceView {
@@ -223,6 +247,7 @@ private struct FileDragSource<Content: View>: NSViewRepresentable {
         view.onMoved = onMoved
         view.onMissing = onMissing
         view.onDragEnded = onDragEnded
+        view.onQuickLook = onQuickLook
         view.addSubview(host)
         NSLayoutConstraint.activate([
             host.topAnchor.constraint(equalTo: view.topAnchor),
@@ -240,6 +265,7 @@ private struct FileDragSource<Content: View>: NSViewRepresentable {
         nsView.onMoved = onMoved
         nsView.onMissing = onMissing
         nsView.onDragEnded = onDragEnded
+        nsView.onQuickLook = onQuickLook
         (nsView.hostingView as? NSHostingView<Content>)?.rootView = content()
     }
 }
@@ -250,11 +276,20 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
     var onMoved: () -> Void = {}
     var onMissing: () -> Void = {}
     var onDragEnded: () -> Void = {}
+    var onQuickLook: () -> Void = {}
     weak var hostingView: NSView?
 
     private var mouseDownLocation: NSPoint?
     private var cursorInsideShelf = true
+    private var didForceClick = false
     private static let dragThreshold: CGFloat = 3
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        pressureConfiguration = NSPressureConfiguration(pressureBehavior: .primaryDeepClick)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override var intrinsicContentSize: NSSize {
         hostingView?.intrinsicContentSize ?? super.intrinsicContentSize
@@ -262,6 +297,7 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
 
     override func mouseDown(with event: NSEvent) {
         NabLog.write("FileDragSource mouseDown clickCount=\(event.clickCount)")
+        didForceClick = false
         if event.clickCount == 2 {
             mouseDownLocation = nil
             guard let url = resolveURL() else {
@@ -273,6 +309,14 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
             return
         }
         mouseDownLocation = event.locationInWindow
+    }
+
+    override func pressureChange(with event: NSEvent) {
+        guard !didForceClick, event.stage >= 2 else { return }
+        didForceClick = true
+        mouseDownLocation = nil
+        NabLog.write("FileDragSource force click")
+        onQuickLook()
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -465,5 +509,31 @@ private struct ShelfDropTarget: NSViewRepresentable {
                 return nil
             }
         }
+    }
+}
+
+@MainActor
+final class QuickLookCoordinator: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
+    static let shared = QuickLookCoordinator()
+    private var urls: [URL] = []
+
+    func preview(url: URL) {
+        urls = [url]
+        guard let panel = QLPreviewPanel.shared() else { return }
+        panel.dataSource = self
+        panel.delegate = self
+        if panel.isVisible {
+            panel.reloadData()
+        } else {
+            panel.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
+        urls.count
+    }
+
+    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! {
+        urls[index] as NSURL
     }
 }
