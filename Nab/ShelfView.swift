@@ -103,44 +103,45 @@ private struct ShelfIcon: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            FileDragSource(
-                resolveURL: resolveURL,
-                dragImage: thumbnail,
-                onMoved: onRemove,
-                onMissing: onRemove,
-                onDragEnded: onDragEnded,
-                onQuickLook: quickLook
-            ) {
-                Image(nsImage: thumbnail ?? NSWorkspace.shared.icon(forFile: item.url.path))
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: Self.iconSize, height: Self.iconSize)
-            }
-            .overlay(alignment: .topLeading) {
-                if hovering {
-                    Button(action: quickLook) {
-                        Image(systemName: "eye.circle.fill")
-                            .font(.system(size: 14))
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(.white, .black.opacity(0.6))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Quick Look")
-                    .offset(x: -4, y: -4)
+            HStack(spacing: 0) {
+                Color.clear.frame(maxWidth: .infinity)
+                FileDragSource(
+                    resolveURL: resolveURL,
+                    dragImage: thumbnail,
+                    onMoved: onRemove,
+                    onMissing: onRemove,
+                    onDragEnded: onDragEnded,
+                    onQuickLook: quickLook
+                ) {
+                    Image(nsImage: thumbnail ?? NSWorkspace.shared.icon(forFile: item.url.path))
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: Self.iconSize, height: Self.iconSize)
                 }
-            }
-            .overlay(alignment: .topTrailing) {
-                if hovering {
-                    Button(action: onRemove) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 14))
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(.white, .black.opacity(0.6))
+                Color.clear
+                    .frame(maxWidth: .infinity)
+                    .overlay {
+                        VStack(spacing: 10) {
+                            Button(action: onRemove) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 24))
+                                    .symbolRenderingMode(.palette)
+                                    .foregroundStyle(.white, .black.opacity(0.6))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Remove")
+
+                            Button(action: quickLook) {
+                                Image(systemName: "eye.circle.fill")
+                                    .font(.system(size: 24))
+                                    .symbolRenderingMode(.palette)
+                                    .foregroundStyle(.white, .black.opacity(0.6))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Quick Look")
+                        }
+                        .opacity(hovering ? 1 : 0)
                     }
-                    .buttonStyle(.plain)
-                    .help("Remove")
-                    .offset(x: 4, y: -4)
-                }
             }
             Text(item.displayName)
                 .font(.system(size: 12))
