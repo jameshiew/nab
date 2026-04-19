@@ -25,16 +25,17 @@ final class ShelfController {
         dragMonitor.dragMoved = { [weak self] point in self?.onDragMoved(at: point) }
         dragMonitor.start()
         _ = panel
-        observeEmptyState()
+        observeItems()
     }
 
-    private func observeEmptyState() {
+    private func observeItems() {
         withObservationTracking {
-            _ = model.items.isEmpty
+            _ = model.items
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                self.observeEmptyState()
+                self.observeItems()
+                self.panel.updateHeight(forItemCount: self.model.items.count)
                 self.updateHideSchedule()
             }
         }
