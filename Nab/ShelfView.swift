@@ -145,11 +145,7 @@ struct ShelfView: View {
             .padding()
         } else {
             ScrollView {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 60), spacing: 8)],
-                    alignment: .center,
-                    spacing: 8
-                ) {
+                LazyVStack(spacing: 12) {
                     ForEach(model.items) { item in
                         ShelfIcon(
                             item: item,
@@ -159,7 +155,8 @@ struct ShelfView: View {
                         )
                     }
                 }
-                .padding(8)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
             }
         }
     }
@@ -173,10 +170,10 @@ private struct ShelfIcon: View {
     @State private var hovering = false
     @State private var thumbnail: NSImage?
 
-    private static let iconSize: CGFloat = 48
+    private static let iconSize: CGFloat = 96
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 6) {
             ZStack(alignment: .topTrailing) {
                 FileDragSource(
                     resolveURL: resolveURL,
@@ -203,8 +200,8 @@ private struct ShelfIcon: View {
                 }
             }
             Text(item.displayName)
-                .font(.system(size: 10))
-                .lineLimit(2)
+                .font(.system(size: 12))
+                .lineLimit(1)
                 .multilineTextAlignment(.center)
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity)
