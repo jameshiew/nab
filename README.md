@@ -1,6 +1,6 @@
 # nab
 
-A minimal shelf for macOS. Drag files onto a small panel that slides
+A minimal vibe coded shelf for macOS. Drag files onto a small panel that slides
 in from the right edge of your screen, then drag them out to wherever you need
 them.
 
@@ -20,7 +20,3 @@ status bar.
 - Drag things out of the shelf to drop them where you want them.
 - Hover over an item and click the × to remove it. The shelf auto-hides when empty
   and the drag is over.
-
-## License
-
-[MIT-0](./LICENSE).
