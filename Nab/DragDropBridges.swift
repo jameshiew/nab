@@ -67,7 +67,7 @@ struct FileDragSource<Content: View>: NSViewRepresentable {
     let model: ShelfModel
     let dragImage: NSImage?
     let onDragEnded: () -> Void
-    let onQuickLook: () -> Void
+    let onForceClick: () -> Void
     @ViewBuilder let content: () -> Content
 
     func makeNSView(context: Context) -> FileDragSourceView {
@@ -78,7 +78,7 @@ struct FileDragSource<Content: View>: NSViewRepresentable {
         view.model = model
         view.dragImage = dragImage
         view.onDragEnded = onDragEnded
-        view.onQuickLook = onQuickLook
+        view.onForceClick = onForceClick
         view.addSubview(host)
         NSLayoutConstraint.activate([
             host.topAnchor.constraint(equalTo: view.topAnchor),
@@ -95,7 +95,7 @@ struct FileDragSource<Content: View>: NSViewRepresentable {
         nsView.model = model
         nsView.dragImage = dragImage
         nsView.onDragEnded = onDragEnded
-        nsView.onQuickLook = onQuickLook
+        nsView.onForceClick = onForceClick
         (nsView.hostingView as? NSHostingView<Content>)?.rootView = content()
     }
 
@@ -113,7 +113,7 @@ final class FileDragSourceView: NSView, NSDraggingSource {
     weak var model: ShelfModel?
     var dragImage: NSImage?
     var onDragEnded: () -> Void = {}
-    var onQuickLook: () -> Void = {}
+    var onForceClick: () -> Void = {}
     weak var hostingView: NSView?
 
     private var mouseDownLocation: NSPoint?
@@ -138,12 +138,11 @@ final class FileDragSourceView: NSView, NSDraggingSource {
         if event.clickCount == 2 {
             mouseDownLocation = nil
             pendingClickAction = nil
-            guard let url = model.resolveURL(for: itemID) else {
-                model.remove(itemID)
-                return
+            let urls = model.resolveURLs(for: itemID)
+            for url in urls {
+                Log.shelf.debug("FileDragSource opening \(url.path, privacy: .public)")
+                NSWorkspace.shared.open(url)
             }
-            Log.shelf.debug("FileDragSource opening \(url.path, privacy: .public)")
-            NSWorkspace.shared.open(url)
             return
         }
 
@@ -179,7 +178,7 @@ final class FileDragSourceView: NSView, NSDraggingSource {
         mouseDownLocation = nil
         pendingClickAction = nil
         Log.shelf.debug("FileDragSource force click")
-        onQuickLook()
+        onForceClick()
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -206,42 +205,43 @@ final class FileDragSourceView: NSView, NSDraggingSource {
 
         var dragItems: [NSDraggingItem] = []
         var successfulIDs: [ShelfItem.ID] = []
-        var missingIDs: [ShelfItem.ID] = []
         let dragSize: CGFloat = 48
         let clickLocation = convert(event.locationInWindow, from: nil)
+        // Stack offset is global across all dragged files so a multi-item
+        // selection that includes stacks still fans out nicely.
+        var stackIndex = 0
 
-        for (index, shelfItem) in selected.enumerated() {
-            guard let url = model.resolveURL(for: shelfItem.id) else {
-                missingIDs.append(shelfItem.id)
-                continue
+        for shelfItem in selected {
+            let urls = model.resolveURLs(for: shelfItem.id)
+            // resolveURLs auto-removes an item whose files have all gone missing.
+            if urls.isEmpty { continue }
+            let isClickedItem = shelfItem.id == itemID
+            for (entryIdx, url) in urls.enumerated() {
+                let isPrimary = isClickedItem && entryIdx == 0
+                let image: NSImage = {
+                    if isPrimary, let dragImage, let copy = dragImage.copy() as? NSImage {
+                        copy.size = NSSize(width: dragSize, height: dragSize)
+                        return copy
+                    }
+                    let icon = NSWorkspace.shared.icon(forFile: url.path)
+                    icon.size = NSSize(width: dragSize, height: dragSize)
+                    return icon
+                }()
+                let draggingItem = NSDraggingItem(pasteboardWriter: url as NSURL)
+                let offset: CGFloat = isPrimary ? 0 : CGFloat(stackIndex) * 4
+                draggingItem.setDraggingFrame(
+                    NSRect(
+                        x: clickLocation.x - dragSize / 2 + offset,
+                        y: clickLocation.y - dragSize / 2 - offset,
+                        width: dragSize,
+                        height: dragSize
+                    ),
+                    contents: image
+                )
+                dragItems.append(draggingItem)
+                stackIndex += 1
             }
-            let image: NSImage = {
-                if shelfItem.id == itemID, let dragImage, let copy = dragImage.copy() as? NSImage {
-                    copy.size = NSSize(width: dragSize, height: dragSize)
-                    return copy
-                }
-                let icon = NSWorkspace.shared.icon(forFile: url.path)
-                icon.size = NSSize(width: dragSize, height: dragSize)
-                return icon
-            }()
-            let draggingItem = NSDraggingItem(pasteboardWriter: url as NSURL)
-            // Offset secondary items to suggest a stack behind the primary.
-            let offset: CGFloat = shelfItem.id == itemID ? 0 : CGFloat(index) * 4
-            draggingItem.setDraggingFrame(
-                NSRect(
-                    x: clickLocation.x - dragSize / 2 + offset,
-                    y: clickLocation.y - dragSize / 2 - offset,
-                    width: dragSize,
-                    height: dragSize
-                ),
-                contents: image
-            )
-            dragItems.append(draggingItem)
             successfulIDs.append(shelfItem.id)
-        }
-
-        if !missingIDs.isEmpty {
-            model.remove(ids: missingIDs)
         }
 
         guard !dragItems.isEmpty else {
