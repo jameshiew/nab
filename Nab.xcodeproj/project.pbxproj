@@ -94,6 +94,7 @@
 				B000000000000000000000B0 /* Sources */,
 				B100000000000000000000B1 /* Frameworks */,
 				B200000000000000000000B2 /* Resources */,
+				B600000000000000000000B6 /* Embed Git Version */,
 			);
 			buildRules = (
 			);
@@ -156,6 +157,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "xcrun swift-format lint -r \"${SRCROOT}/Nab\"\n";
+		};
+		B600000000000000000000B6 /* Embed Git Version */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Embed Git Version";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/Scripts/embed-git-version.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
