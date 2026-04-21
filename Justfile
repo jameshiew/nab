@@ -28,3 +28,8 @@ fmt:
 
 lint:
     xcrun swift-format lint -r Nab/
+
+clean:
+    trash build
+    xcodebuild -project {{ project }} -scheme {{ scheme }} -configuration Debug clean
+    xcodebuild -project {{ project }} -scheme {{ scheme }} -configuration Release -derivedDataPath build clean
