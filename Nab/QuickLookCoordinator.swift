@@ -7,8 +7,12 @@ final class QuickLookCoordinator: NSObject, QLPreviewPanelDataSource, QLPreviewP
     private var urls: [URL] = []
 
     func preview(url: URL) {
-        urls = [url]
         guard let panel = QLPreviewPanel.shared() else { return }
+        if panel.isVisible, urls.first == url {
+            panel.orderOut(nil)
+            return
+        }
+        urls = [url]
         panel.dataSource = self
         panel.delegate = self
         if panel.isVisible {
