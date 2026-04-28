@@ -245,10 +245,7 @@ final class FileDragSourceView: NSView, NSDraggingSource {
         }
 
         guard !dragItems.isEmpty else {
-            NSAnimationEffect.poof.show(
-                centeredAt: NSEvent.mouseLocation,
-                size: NSSize(width: 32, height: 32)
-            )
+            ShelfFeedback.rejectedDrop()
             onDragEnded()
             return
         }
@@ -281,7 +278,10 @@ final class FileDragSourceView: NSView, NSDraggingSource {
         endedAt screenPoint: NSPoint,
         operation: NSDragOperation
     ) {
-        if operation == .move || droppedOnFinderWindow(at: screenPoint) {
+        let moved =
+            operation.contains(.move)
+            || (operation == [] && droppedOnFinderWindow(at: screenPoint))
+        if moved {
             model?.remove(ids: draggedIDs)
         }
         draggedIDs = []
@@ -293,22 +293,70 @@ final class FileDragSourceView: NSView, NSDraggingSource {
     /// treat that as a logical move and clear the shelf entry.
     private func droppedOnFinderWindow(at screenPoint: NSPoint) -> Bool {
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
-        guard let infos = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]],
-            let primary = NSScreen.screens.first
-        else { return false }
-        let cgY = primary.frame.maxY - screenPoint.y
+        guard let infos = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return false
+        }
+        let quartzPoint = Self.quartzPoint(from: screenPoint)
         for info in infos {
-            guard (info[kCGWindowLayer as String] as? Int) == 0,
-                let bounds = info[kCGWindowBounds as String] as? [String: CGFloat]
+            guard Self.intValue(info[kCGWindowLayer as String]) == 0,
+                let bounds = Self.windowBounds(from: info)
             else { continue }
-            let x = bounds["X"] ?? 0
-            let y = bounds["Y"] ?? 0
-            let w = bounds["Width"] ?? 0
-            let h = bounds["Height"] ?? 0
-            guard screenPoint.x >= x, screenPoint.x <= x + w, cgY >= y, cgY <= y + h else { continue }
-            return (info[kCGWindowOwnerName as String] as? String) == "Finder"
+            guard bounds.contains(quartzPoint) else { continue }
+            return Self.isFinderWindow(info)
         }
         return false
+    }
+
+    private static func quartzPoint(from screenPoint: NSPoint) -> CGPoint {
+        let desktopBounds = NSScreen.screens.reduce(NSRect.null) { bounds, screen in
+            bounds.isNull ? screen.frame : bounds.union(screen.frame)
+        }
+        guard !desktopBounds.isNull else {
+            return CGPoint(x: screenPoint.x, y: screenPoint.y)
+        }
+        return CGPoint(x: screenPoint.x, y: desktopBounds.maxY - screenPoint.y)
+    }
+
+    private static func windowBounds(from info: [String: Any]) -> CGRect? {
+        guard let bounds = info[kCGWindowBounds as String] as? [String: Any],
+            let x = cgFloatValue(bounds["X"]),
+            let y = cgFloatValue(bounds["Y"]),
+            let width = cgFloatValue(bounds["Width"]),
+            let height = cgFloatValue(bounds["Height"])
+        else {
+            return nil
+        }
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    private static func isFinderWindow(_ info: [String: Any]) -> Bool {
+        if (info[kCGWindowOwnerName as String] as? String) == "Finder" {
+            return true
+        }
+        guard let pid = intValue(info[kCGWindowOwnerPID as String]) else {
+            return false
+        }
+        return NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier == "com.apple.finder"
+    }
+
+    private static func cgFloatValue(_ value: Any?) -> CGFloat? {
+        if let value = value as? CGFloat {
+            return value
+        }
+        if let value = value as? NSNumber {
+            return CGFloat(truncating: value)
+        }
+        return nil
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let value = value as? Int {
+            return value
+        }
+        if let value = value as? NSNumber {
+            return value.intValue
+        }
+        return nil
     }
 }
 
@@ -369,13 +417,7 @@ struct ShelfDropTarget: NSViewRepresentable {
             var urls: [URL] = []
 
             // Prefer file URLs when present — covers Finder drags of any file type.
-            let fileOptions: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
-            if let fileURLs = pasteboard.readObjects(
-                forClasses: [NSURL.self],
-                options: fileOptions
-            ) as? [URL] {
-                urls.append(contentsOf: fileURLs.filter { FileManager.default.fileExists(atPath: $0.path) })
-            }
+            urls.append(contentsOf: Self.fileURLs(from: pasteboard))
 
             // Fall back to image data — covers ad hoc screenshots (Cmd+Shift+4 thumbnail)
             // and dragged images that expose no file URL on the pasteboard.
@@ -397,14 +439,44 @@ struct ShelfDropTarget: NSViewRepresentable {
         }
 
         private static func saveScreenshot(data: Data, ext: String) -> URL? {
-            let filename = "Screenshot \(screenshotFormatter.string(from: Date())).\(ext)"
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            let filename = "Screenshot \(screenshotFormatter.string(from: Date()))-\(UUID().uuidString).\(ext)"
             do {
+                let directory = try materializedImageDirectory()
+                let url = directory.appendingPathComponent(filename)
                 try data.write(to: url, options: .atomic)
                 return url
             } catch {
+                Log.shelf.error("Failed to materialize dropped image: \(error.localizedDescription, privacy: .public)")
                 return nil
             }
+        }
+
+        private static func fileURLs(from pasteboard: NSPasteboard) -> [URL] {
+            let fileOptions: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+            let objects = pasteboard.readObjects(forClasses: [NSURL.self], options: fileOptions) ?? []
+            return objects.compactMap { object in
+                if let url = object as? URL {
+                    return url
+                }
+                if let url = object as? NSURL {
+                    return url as URL
+                }
+                return nil
+            }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        }
+
+        private static func materializedImageDirectory() throws -> URL {
+            let manager = FileManager.default
+            let baseURL =
+                manager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                ?? manager.temporaryDirectory
+            let directory =
+                baseURL
+                .appendingPathComponent("Nab", isDirectory: true)
+                .appendingPathComponent("Dropped Images", isDirectory: true)
+            try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+            return directory
         }
     }
 }

@@ -2,16 +2,21 @@ import Foundation
 
 struct FileEntry: Hashable {
     var url: URL
-    let bookmarkData: Data?
+    var bookmarkData: Data?
 }
 
 struct ShelfItem: Identifiable, Hashable {
-    let id = UUID()
+    let id: UUID
     var entries: [FileEntry]
+
+    init(id: UUID = UUID(), entries: [FileEntry]) {
+        precondition(!entries.isEmpty, "ShelfItem requires at least one file entry")
+        self.id = id
+        self.entries = entries
+    }
 
     var isStack: Bool { entries.count > 1 }
     var primaryURL: URL { entries[0].url }
-    var urls: [URL] { entries.map(\.url) }
     var displayName: String {
         isStack ? "\(entries.count) items" : entries[0].url.lastPathComponent
     }
@@ -28,14 +33,14 @@ final class ShelfModel {
     /// added vs. rejected as duplicates.
     @discardableResult
     func add(_ urls: [URL]) -> (added: Int, duplicates: Int) {
-        var existing = Set(items.flatMap { $0.entries.map(\.url.standardizedFileURL) })
+        var existing = Set(items.flatMap { $0.entries.map { Self.duplicateKey(for: $0.url) } })
         var entries: [FileEntry] = []
         var duplicates = 0
         for url in urls {
-            let key = url.standardizedFileURL
+            let fileURL = url.standardizedFileURL
+            let key = Self.duplicateKey(for: fileURL)
             if existing.insert(key).inserted {
-                let data = try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
-                entries.append(FileEntry(url: url, bookmarkData: data))
+                entries.append(FileEntry(url: fileURL, bookmarkData: Self.bookmarkData(for: fileURL)))
             } else {
                 duplicates += 1
             }
@@ -54,26 +59,10 @@ final class ShelfModel {
         var resolved: [URL] = []
         var keptEntries: [FileEntry] = []
         for entry in items[idx].entries {
-            if let data = entry.bookmarkData {
-                var isStale = false
-                if let url = try? URL(
-                    resolvingBookmarkData: data,
-                    options: [.withoutUI],
-                    relativeTo: nil,
-                    bookmarkDataIsStale: &isStale
-                ), FileManager.default.fileExists(atPath: url.path) {
-                    var updated = entry
-                    updated.url = url
-                    keptEntries.append(updated)
-                    resolved.append(url)
-                    continue
-                }
-            } else if FileManager.default.fileExists(atPath: entry.url.path) {
+            if let entry = Self.resolvedEntry(for: entry) {
                 keptEntries.append(entry)
                 resolved.append(entry.url)
-                continue
             }
-            // File is gone and can't be recovered — drop this entry.
         }
         if keptEntries.isEmpty {
             remove(id)
@@ -170,5 +159,57 @@ final class ShelfModel {
     /// Selected items in on-screen (items array) order.
     func selectedItemsInOrder() -> [ShelfItem] {
         items.filter { selectedIDs.contains($0.id) }
+    }
+
+    private static func resolvedEntry(for entry: FileEntry) -> FileEntry? {
+        if let resolved = resolvedBookmarkEntry(for: entry) {
+            return resolved
+        }
+
+        let fallbackURL = entry.url.standardizedFileURL
+        guard FileManager.default.fileExists(atPath: fallbackURL.path) else {
+            return nil
+        }
+
+        var updated = entry
+        updated.url = fallbackURL
+        updated.bookmarkData = bookmarkData(for: fallbackURL)
+        return updated
+    }
+
+    private static func resolvedBookmarkEntry(for entry: FileEntry) -> FileEntry? {
+        guard let data = entry.bookmarkData else { return nil }
+
+        var isStale = false
+        guard
+            let url = try? URL(
+                resolvingBookmarkData: data,
+                options: [.withoutUI],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+        else {
+            return nil
+        }
+
+        let fileURL = url.standardizedFileURL
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return nil
+        }
+
+        var updated = entry
+        updated.url = fileURL
+        if isStale {
+            updated.bookmarkData = bookmarkData(for: fileURL)
+        }
+        return updated
+    }
+
+    private static func duplicateKey(for url: URL) -> URL {
+        url.standardizedFileURL.resolvingSymlinksInPath()
+    }
+
+    private static func bookmarkData(for url: URL) -> Data? {
+        try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
     }
 }

@@ -26,10 +26,7 @@ struct ShelfView: View {
         guard !urls.isEmpty else { return }
         let result = model.add(urls)
         if result.added == 0 && result.duplicates > 0 {
-            NSAnimationEffect.poof.show(
-                centeredAt: NSEvent.mouseLocation,
-                size: NSSize(width: 32, height: 32)
-            )
+            ShelfFeedback.rejectedDrop()
         }
         onDropReceived()
     }

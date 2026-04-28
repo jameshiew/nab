@@ -18,6 +18,7 @@ final class ShelfPanel: NSPanel {
     private(set) var currentHeight: CGFloat = baseHeight
     private var isShown = false
     private var customTopLeft: CGPoint?
+    private var moveObserver: NSObjectProtocol?
 
     var size: CGSize { CGSize(width: Self.width, height: currentHeight) }
 
@@ -57,14 +58,22 @@ final class ShelfPanel: NSPanel {
         setFrame(hiddenFrame, display: false)
         orderFrontRegardless()
 
-        NotificationCenter.default.addObserver(
+        moveObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didMoveNotification,
             object: self,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 Log.shelf.debug("windowDidMove frame=\(self.frame.debugDescription, privacy: .public)")
+            }
+        }
+    }
+
+    deinit {
+        MainActor.assumeIsolated {
+            if let moveObserver {
+                NotificationCenter.default.removeObserver(moveObserver)
             }
         }
     }
@@ -80,26 +89,21 @@ final class ShelfPanel: NSPanel {
                 width: size.width,
                 height: size.height
             )
-            if Self.screenContaining(proposed) != nil {
-                return proposed
+            if let frame = Self.clampedVisibleFrame(for: proposed) {
+                return frame
             }
             Log.shelf.debug(
                 "visibleFrame custom OFF-SCREEN top=\(top.debugDescription, privacy: .public) proposed=\(proposed.debugDescription, privacy: .public)"
             )
-        } else {
-            Log.shelf.debug("visibleFrame DEFAULT (customTopLeft=nil)")
         }
-        let screen = NSScreen.main?.visibleFrame ?? .zero
-        let x = screen.maxX - size.width - Self.edgeInset
-        let y = screen.midY - size.height / 2
-        return NSRect(origin: CGPoint(x: x, y: y), size: size)
+        return Self.defaultVisibleFrame(for: size)
     }
 
     var hiddenFrame: NSRect {
         let visible = visibleFrame
-        let screen = Self.screenContaining(visible) ?? (NSScreen.main?.frame ?? .zero)
+        let screenFrame = Self.screenBestMatching(visible)?.frame ?? (NSScreen.main?.frame ?? .zero)
         return NSRect(
-            x: screen.maxX + Self.edgeInset,
+            x: screenFrame.maxX + Self.edgeInset,
             y: visible.origin.y,
             width: size.width,
             height: size.height
@@ -107,20 +111,17 @@ final class ShelfPanel: NSPanel {
     }
 
     func userDidFinishDragging() {
-        let topLeft = CGPoint(x: frame.minX, y: frame.maxY)
+        let savedFrame = Self.clampedVisibleFrame(for: frame) ?? Self.defaultVisibleFrame(for: size)
+        if savedFrame != frame {
+            setFrame(savedFrame, display: true)
+        }
+
+        let topLeft = CGPoint(x: savedFrame.minX, y: savedFrame.maxY)
         Log.shelf.debug(
-            "userDidFinishDragging saving top=\(topLeft.debugDescription, privacy: .public) frame=\(self.frame.debugDescription, privacy: .public)"
+            "userDidFinishDragging saving top=\(topLeft.debugDescription, privacy: .public) frame=\(savedFrame.debugDescription, privacy: .public)"
         )
         customTopLeft = topLeft
         ShelfPreferences.topLeft = topLeft
-    }
-
-    private static func screenContaining(_ point: CGPoint) -> NSScreen? {
-        NSScreen.screens.first { $0.frame.contains(point) }
-    }
-
-    private static func screenContaining(_ rect: NSRect) -> CGRect? {
-        NSScreen.screens.first { $0.frame.intersects(rect) }?.frame
     }
 
     func slideIn() {
@@ -143,9 +144,13 @@ final class ShelfPanel: NSPanel {
             let rows = CGFloat(count) * Self.rowHeight + CGFloat(count - 1) * Self.rowSpacing
             return Self.chromeHeight + Self.contentVerticalPadding + rows
         }()
-        let screenHeight = NSScreen.main?.visibleFrame.height ?? Self.baseHeight
-        let maxAllowed = max(Self.baseHeight, screenHeight - Self.screenMargin)
-        let newHeight = min(max(Self.baseHeight, needed), maxAllowed)
+        let screenHeight =
+            Self.screenBestMatching(visibleFrame)?.visibleFrame.height
+            ?? NSScreen.main?.visibleFrame.height
+            ?? Self.baseHeight
+        let minimumHeight = min(Self.baseHeight, screenHeight)
+        let maxAllowed = max(minimumHeight, screenHeight - Self.screenMargin)
+        let newHeight = min(max(minimumHeight, needed), maxAllowed)
         guard abs(newHeight - currentHeight) > 0.5 else { return }
         currentHeight = newHeight
         if isShown {
@@ -162,5 +167,45 @@ final class ShelfPanel: NSPanel {
             ctx.allowsImplicitAnimation = true
             self.animator().setFrame(frame, display: true)
         }
+    }
+
+    private static func defaultVisibleFrame(for size: CGSize) -> NSRect {
+        let screen = NSScreen.main?.visibleFrame ?? NSRect(origin: .zero, size: size)
+        let proposed = NSRect(
+            x: screen.maxX - size.width - edgeInset,
+            y: screen.midY - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
+        return clampedFrame(proposed, to: screen)
+    }
+
+    private static func clampedVisibleFrame(for proposed: NSRect) -> NSRect? {
+        guard let screen = screenBestMatching(proposed),
+            intersectionArea(proposed, screen.visibleFrame) > 0
+        else {
+            return nil
+        }
+        return clampedFrame(proposed, to: screen.visibleFrame)
+    }
+
+    private static func screenBestMatching(_ rect: NSRect) -> NSScreen? {
+        NSScreen.screens.max { lhs, rhs in
+            intersectionArea(rect, lhs.visibleFrame) < intersectionArea(rect, rhs.visibleFrame)
+        }
+    }
+
+    private static func clampedFrame(_ frame: NSRect, to bounds: NSRect) -> NSRect {
+        let maxX = max(bounds.minX, bounds.maxX - frame.width)
+        let maxY = max(bounds.minY, bounds.maxY - frame.height)
+        let x = min(max(frame.minX, bounds.minX), maxX)
+        let y = min(max(frame.minY, bounds.minY), maxY)
+        return NSRect(x: x, y: y, width: frame.width, height: frame.height)
+    }
+
+    private static func intersectionArea(_ lhs: NSRect, _ rhs: NSRect) -> CGFloat {
+        let intersection = lhs.intersection(rhs)
+        guard !intersection.isNull else { return 0 }
+        return max(0, intersection.width) * max(0, intersection.height)
     }
 }

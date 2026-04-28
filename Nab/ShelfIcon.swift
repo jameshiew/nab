@@ -144,7 +144,10 @@ struct ShelfIcon: View {
             representationTypes: .thumbnail
         )
         if let rep = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request) {
+            guard !Task.isCancelled else { return }
             thumbnail = rep.nsImage
+        } else if !Task.isCancelled {
+            thumbnail = nil
         }
     }
 }

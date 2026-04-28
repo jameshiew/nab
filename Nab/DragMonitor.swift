@@ -19,7 +19,16 @@ final class DragMonitor {
         baselineChangeCount = pasteboard.changeCount
     }
 
+    deinit {
+        MainActor.assumeIsolated {
+            if let m = dragMonitor { NSEvent.removeMonitor(m) }
+            if let m = upMonitor { NSEvent.removeMonitor(m) }
+        }
+    }
+
     func start() {
+        guard dragMonitor == nil, upMonitor == nil else { return }
+        baselineChangeCount = pasteboard.changeCount
         dragMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged]) { [weak self] _ in
             self?.handleDrag()
         }
@@ -33,6 +42,8 @@ final class DragMonitor {
         if let m = upMonitor { NSEvent.removeMonitor(m) }
         dragMonitor = nil
         upMonitor = nil
+        inDrag = false
+        baselineChangeCount = pasteboard.changeCount
     }
 
     /// Call when the app itself has just finished a drag session. Because

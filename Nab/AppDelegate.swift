@@ -8,4 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         controller.start()
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        controller.stop()
+    }
 }

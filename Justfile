@@ -1,13 +1,14 @@
 app_name := "Nab"
 project := "Nab.xcodeproj"
 scheme := "Nab"
+debug_app_path := "build/Build/Products/Debug/Nab.app"
 release_app_path := "build/Build/Products/Release/Nab.app"
 
 run-debug: build-debug
-    open ~/Library/Developer/Xcode/DerivedData/Nab-*/Build/Products/Debug/Nab.app
+    open {{ debug_app_path }}
 
 build-debug:
-    xcodebuild -project {{ project }} -scheme {{ scheme }} -configuration Debug build
+    xcodebuild -project {{ project }} -scheme {{ scheme }} -configuration Debug -derivedDataPath build build
 
 build-release:
     xcodebuild -project {{ project }} -scheme {{ scheme }} -configuration Release -derivedDataPath build build

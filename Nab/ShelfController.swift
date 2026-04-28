@@ -29,6 +29,11 @@ final class ShelfController {
         observeItems()
     }
 
+    func stop() {
+        cancelHide()
+        dragMonitor.stop()
+    }
+
     private func observeItems() {
         withObservationTracking {
             _ = model.items

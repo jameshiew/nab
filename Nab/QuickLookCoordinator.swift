@@ -27,6 +27,13 @@ final class QuickLookCoordinator: NSObject, QLPreviewPanelDataSource, QLPreviewP
     }
 
     func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! {
-        urls[index] as NSURL
+        guard urls.indices.contains(index) else { return nil }
+        return urls[index] as NSURL
+    }
+
+    func previewPanelWillClose(_ panel: QLPreviewPanel!) {
+        urls = []
+        panel.dataSource = nil
+        panel.delegate = nil
     }
 }
