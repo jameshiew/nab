@@ -198,6 +198,38 @@ final class FileDragSourceView: NSView, NSDraggingSource {
         pendingClickAction = nil
     }
 
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let itemID, let model else { return nil }
+        let urls = model.resolveURLs(for: itemID)
+        guard !urls.isEmpty else { return nil }
+
+        let menu = NSMenu()
+        if urls.count == 1 {
+            menu.addItem(showInFinderMenuItem(for: urls[0]))
+        } else {
+            let item = NSMenuItem(title: "Show in Finder", action: nil, keyEquivalent: "")
+            item.image = Self.finderMenuIcon()
+
+            let submenu = NSMenu(title: "Show in Finder")
+            for url in urls {
+                let title = Self.menuTitle(for: url)
+                let image = Self.fileMenuIcon(for: url)
+                submenu.addItem(showInFinderMenuItem(for: url, title: title, image: image))
+            }
+            item.submenu = submenu
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @objc private func showInFinder(_ sender: NSMenuItem) {
+        let url =
+            (sender.representedObject as? URL)
+            ?? (sender.representedObject as? NSURL).map { $0 as URL }
+        guard let url else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
     private func startDrag(with event: NSEvent) {
         guard let itemID, let model else { return }
         model.ensureSelectedForDrag(itemID)
@@ -253,6 +285,32 @@ final class FileDragSourceView: NSView, NSDraggingSource {
         draggedIDs = successfulIDs
         cursorInsideShelf = true
         beginDraggingSession(with: dragItems, event: event, source: self)
+    }
+
+    private func showInFinderMenuItem(for url: URL, title: String = "Show in Finder") -> NSMenuItem {
+        showInFinderMenuItem(for: url, title: title, image: Self.finderMenuIcon())
+    }
+
+    private func showInFinderMenuItem(for url: URL, title: String, image: NSImage?) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(showInFinder(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = url as NSURL
+        item.image = image
+        return item
+    }
+
+    private static func menuTitle(for url: URL) -> String {
+        url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
+    }
+
+    private static func finderMenuIcon() -> NSImage? {
+        NSImage(systemSymbolName: "finder", accessibilityDescription: "Finder")
+    }
+
+    private static func fileMenuIcon(for url: URL) -> NSImage {
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        icon.size = NSSize(width: 16, height: 16)
+        return icon
     }
 
     func draggingSession(
