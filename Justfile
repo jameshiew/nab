@@ -24,6 +24,9 @@ install: build-release
       -e 'set sourceApp to POSIX file "'"$app_path"'"' \
       -e 'do shell script "/bin/rm -rf /Applications/{{ app_name }}.app && /usr/bin/ditto " & quoted form of POSIX path of sourceApp & " /Applications/{{ app_name }}.app" with administrator privileges'
 
+icon:
+    xcrun swift Scripts/generate-app-icon.swift
+
 fmt:
     xcrun swift-format format -i -r Nab/
 
