@@ -23,6 +23,9 @@ audit:
 
 verify: lint audit test build-debug
 
+run:
+    open {{ debug_app_path }}
+
 run-release: build-release
     open {{ release_app_path }}
 
