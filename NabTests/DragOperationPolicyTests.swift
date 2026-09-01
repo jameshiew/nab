@@ -52,8 +52,8 @@ final class DragOperationPolicyTests: XCTestCase {
         XCTAssertTrue(DragOperationPolicy.shouldRemoveItems(after: [.copy, .move]))
     }
 
-    func testCopyKeepsDraggedItems() {
-        XCTAssertFalse(DragOperationPolicy.shouldRemoveItems(after: .copy))
+    func testCopyRemovesDraggedItems() {
+        XCTAssertTrue(DragOperationPolicy.shouldRemoveItems(after: .copy))
     }
 
     func testCancelledOrRejectedDragKeepsDraggedItems() {
