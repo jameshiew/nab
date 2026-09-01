@@ -60,8 +60,7 @@ struct WindowDragHandle: NSViewRepresentable {
 
 /// SwiftUI view that hosts arbitrary content but lets us drive an AppKit
 /// `NSDraggingSession` directly, so we can: (1) drag multiple selected items as
-/// one stack, (2) supply our thumbnail as the drag image, and (3) detect Finder
-/// same-folder rejects so we can still treat them as moves.
+/// one stack and (2) supply our thumbnail as the drag image.
 struct FileDragSource<Content: View>: NSViewRepresentable {
     let itemID: ShelfItem.ID
     let model: ShelfModel
@@ -336,85 +335,11 @@ final class FileDragSourceView: NSView, NSDraggingSource {
         endedAt screenPoint: NSPoint,
         operation: NSDragOperation
     ) {
-        let moved =
-            operation.contains(.move)
-            || (operation == [] && droppedOnFinderWindow(at: screenPoint))
-        if moved {
+        if operation.contains(.move) {
             model?.remove(ids: draggedIDs)
         }
         draggedIDs = []
         onDragEnded()
-    }
-
-    /// Finder rejects same-folder drops with `.none`, so a `.none` result over a
-    /// Finder window implies the user dragged the file back where it came from;
-    /// treat that as a logical move and clear the shelf entry.
-    private func droppedOnFinderWindow(at screenPoint: NSPoint) -> Bool {
-        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
-        guard let infos = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
-            return false
-        }
-        let quartzPoint = Self.quartzPoint(from: screenPoint)
-        for info in infos {
-            guard Self.intValue(info[kCGWindowLayer as String]) == 0,
-                let bounds = Self.windowBounds(from: info)
-            else { continue }
-            guard bounds.contains(quartzPoint) else { continue }
-            return Self.isFinderWindow(info)
-        }
-        return false
-    }
-
-    private static func quartzPoint(from screenPoint: NSPoint) -> CGPoint {
-        let desktopBounds = NSScreen.screens.reduce(NSRect.null) { bounds, screen in
-            bounds.isNull ? screen.frame : bounds.union(screen.frame)
-        }
-        guard !desktopBounds.isNull else {
-            return CGPoint(x: screenPoint.x, y: screenPoint.y)
-        }
-        return CGPoint(x: screenPoint.x, y: desktopBounds.maxY - screenPoint.y)
-    }
-
-    private static func windowBounds(from info: [String: Any]) -> CGRect? {
-        guard let bounds = info[kCGWindowBounds as String] as? [String: Any],
-            let x = cgFloatValue(bounds["X"]),
-            let y = cgFloatValue(bounds["Y"]),
-            let width = cgFloatValue(bounds["Width"]),
-            let height = cgFloatValue(bounds["Height"])
-        else {
-            return nil
-        }
-        return CGRect(x: x, y: y, width: width, height: height)
-    }
-
-    private static func isFinderWindow(_ info: [String: Any]) -> Bool {
-        if (info[kCGWindowOwnerName as String] as? String) == "Finder" {
-            return true
-        }
-        guard let pid = intValue(info[kCGWindowOwnerPID as String]) else {
-            return false
-        }
-        return NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier == "com.apple.finder"
-    }
-
-    private static func cgFloatValue(_ value: Any?) -> CGFloat? {
-        if let value = value as? CGFloat {
-            return value
-        }
-        if let value = value as? NSNumber {
-            return CGFloat(truncating: value)
-        }
-        return nil
-    }
-
-    private static func intValue(_ value: Any?) -> Int? {
-        if let value = value as? Int {
-            return value
-        }
-        if let value = value as? NSNumber {
-            return value.intValue
-        }
-        return nil
     }
 }
 
