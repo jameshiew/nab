@@ -41,12 +41,39 @@ private struct NabMenu: View {
 }
 
 private struct SettingsView: View {
-    @State private var startsAtLogin = LoginItemService.isEnabled
+    @Environment(\.scenePhase) private var scenePhase
+
+    @State private var loginItemState = LoginItemService.state
     @State private var errorMessage: String?
 
     var body: some View {
         Form {
             Toggle("Start at login", isOn: startAtLoginBinding)
+                .disabled(!loginItemState.isAvailable)
+
+            switch loginItemState {
+            case .requiresApproval:
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(
+                        "Nab needs your approval in System Settings before it can start "
+                            + "automatically."
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    Button("Open Login Items Settings") {
+                        LoginItemService.openSystemSettings()
+                    }
+                }
+            case .unavailable:
+                Text("Start at login is unavailable for this copy of Nab.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .disabled, .enabled:
+                EmptyView()
+            }
 
             if let errorMessage {
                 Text(errorMessage)
@@ -59,11 +86,15 @@ private struct SettingsView: View {
         .padding(20)
         .frame(width: 320)
         .onAppear(perform: refreshStartAtLogin)
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            refreshStartAtLogin()
+        }
     }
 
     private var startAtLoginBinding: Binding<Bool> {
         Binding {
-            startsAtLogin
+            loginItemState.isOn
         } set: { isEnabled in
             setStartAtLogin(isEnabled)
         }
@@ -76,28 +107,62 @@ private struct SettingsView: View {
             try LoginItemService.setEnabled(isEnabled)
             refreshStartAtLogin()
         } catch {
-            startsAtLogin = LoginItemService.isEnabled
+            refreshStartAtLogin()
             errorMessage = error.localizedDescription
         }
     }
 
     private func refreshStartAtLogin() {
-        startsAtLogin = LoginItemService.isEnabled
+        loginItemState = LoginItemService.state
+    }
+}
+
+enum LoginItemState: Equatable {
+    case disabled
+    case enabled
+    case requiresApproval
+    case unavailable
+
+    init(_ status: SMAppService.Status) {
+        switch status {
+        case .notRegistered:
+            self = .disabled
+        case .enabled:
+            self = .enabled
+        case .requiresApproval:
+            self = .requiresApproval
+        case .notFound:
+            self = .unavailable
+        @unknown default:
+            self = .unavailable
+        }
+    }
+
+    var isOn: Bool {
+        self == .enabled || self == .requiresApproval
+    }
+
+    var isAvailable: Bool {
+        self != .unavailable
     }
 }
 
 private enum LoginItemService {
-    static var isEnabled: Bool {
-        SMAppService.mainApp.status == .enabled
+    static var state: LoginItemState {
+        LoginItemState(SMAppService.mainApp.status)
     }
 
     static func setEnabled(_ isEnabled: Bool) throws {
         if isEnabled {
-            guard SMAppService.mainApp.status != .enabled else { return }
+            guard state == .disabled else { return }
             try SMAppService.mainApp.register()
         } else {
-            guard SMAppService.mainApp.status != .notRegistered else { return }
+            guard state == .enabled || state == .requiresApproval else { return }
             try SMAppService.mainApp.unregister()
         }
+    }
+
+    static func openSystemSettings() {
+        SMAppService.openSystemSettingsLoginItems()
     }
 }

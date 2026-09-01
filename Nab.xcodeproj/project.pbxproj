@@ -31,6 +31,7 @@
 		D10300000000000000000103 /* PanelGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10300000000000000000103 /* PanelGeometryTests.swift */; };
 		D10400000000000000000104 /* FilePromiseExportCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10400000000000000000104 /* FilePromiseExportCoordinatorTests.swift */; };
 		D10500000000000000000105 /* DragDropBridgesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10500000000000000000105 /* DragDropBridgesTests.swift */; };
+		D10600000000000000000106 /* LoginItemStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10600000000000000000106 /* LoginItemStateTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -70,6 +71,7 @@
 		C10300000000000000000103 /* PanelGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelGeometryTests.swift; sourceTree = "<group>"; };
 		C10400000000000000000104 /* FilePromiseExportCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilePromiseExportCoordinatorTests.swift; sourceTree = "<group>"; };
 		C10500000000000000000105 /* DragDropBridgesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DragDropBridgesTests.swift; sourceTree = "<group>"; };
+		C10600000000000000000106 /* LoginItemStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItemStateTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -129,6 +131,7 @@
 			children = (
 				C10500000000000000000105 /* DragDropBridgesTests.swift */,
 				C10000000000000000000100 /* DragOperationPolicyTests.swift */,
+				C10600000000000000000106 /* LoginItemStateTests.swift */,
 				C10100000000000000000101 /* ScreenGeometryTests.swift */,
 				C10300000000000000000103 /* PanelGeometryTests.swift */,
 				C10200000000000000000102 /* ShelfModelTests.swift */,
@@ -294,6 +297,7 @@
 			files = (
 				D10500000000000000000105 /* DragDropBridgesTests.swift in Sources */,
 				D10000000000000000000100 /* DragOperationPolicyTests.swift in Sources */,
+				D10600000000000000000106 /* LoginItemStateTests.swift in Sources */,
 				D10100000000000000000101 /* ScreenGeometryTests.swift in Sources */,
 				D10300000000000000000103 /* PanelGeometryTests.swift in Sources */,
 				D10200000000000000000102 /* ShelfModelTests.swift in Sources */,
