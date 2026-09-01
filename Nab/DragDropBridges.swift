@@ -64,7 +64,7 @@ struct WindowDragHandle: NSViewRepresentable {
 struct FileDragSource<Content: View>: NSViewRepresentable {
     let itemID: ShelfItem.ID
     let model: ShelfModel
-    let exportCoordinator: FilePromiseExportCoordinator
+    let exportCoordinator: FileExportCoordinator
     let dragImage: NSImage?
     let onDragEnded: () -> Void
     let onForceClick: () -> Void
@@ -113,7 +113,7 @@ struct FileDragSource<Content: View>: NSViewRepresentable {
 final class FileDragSourceView: NSView, NSDraggingSource {
     var itemID: ShelfItem.ID?
     weak var model: ShelfModel?
-    var exportCoordinator: FilePromiseExportCoordinator?
+    var exportCoordinator: FileExportCoordinator?
     var dragImage: NSImage?
     var onDragEnded: () -> Void = {}
     var onForceClick: () -> Void = {}
@@ -123,7 +123,7 @@ final class FileDragSourceView: NSView, NSDraggingSource {
     private var pendingClickAction: (() -> Void)?
     private var cursorInsideShelf = true
     private var didForceClick = false
-    private var activeExportID: FilePromiseExportCoordinator.ExportID?
+    private var activeExportID: FileExportCoordinator.ExportID?
     private var dragContainsMaterializedFiles = false
     private static let dragThreshold: CGFloat = 3
 
@@ -272,24 +272,11 @@ final class FileDragSourceView: NSView, NSDraggingSource {
                     icon.size = NSSize(width: dragSize, height: dragSize)
                     return icon
                 }()
-                let pasteboardWriter: NSPasteboardWriting
                 if entry.isMaterializedByNab {
-                    let delegate = exportCoordinator.makePromiseDelegate(
-                        sourceURL: url,
-                        itemID: shelfItem.id,
-                        in: exportID
-                    )
+                    exportCoordinator.retainMaterializedFile(url, in: exportID)
                     dragContainsMaterializedFiles = true
-                    let fileType =
-                        UTType(filenameExtension: url.pathExtension)?.identifier
-                        ?? UTType.data.identifier
-                    pasteboardWriter = NSFilePromiseProvider(
-                        fileType: fileType,
-                        delegate: delegate
-                    )
-                } else {
-                    pasteboardWriter = url as NSURL
                 }
+                let pasteboardWriter = Self.pasteboardWriter(for: entry)
                 let draggingItem = NSDraggingItem(pasteboardWriter: pasteboardWriter)
                 let offset: CGFloat = isPrimary ? 0 : CGFloat(stackIndex) * 4
                 draggingItem.setDraggingFrame(
@@ -316,6 +303,10 @@ final class FileDragSourceView: NSView, NSDraggingSource {
         activeExportID = exportID
         cursorInsideShelf = true
         beginDraggingSession(with: dragItems, event: event, source: self)
+    }
+
+    static func pasteboardWriter(for entry: FileEntry) -> NSPasteboardWriting {
+        entry.url as NSURL
     }
 
     private func showInFinderMenuItem(for url: URL, title: String = "Show in Finder") -> NSMenuItem {

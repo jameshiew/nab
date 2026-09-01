@@ -5,6 +5,20 @@ import XCTest
 
 @MainActor
 final class DragDropBridgesTests: XCTestCase {
+    func testMaterializedImageDragPublishesAFileURL() {
+        let entry = FileEntry(
+            url: URL(fileURLWithPath: "/tmp/materialized.png"),
+            isMaterializedByNab: true
+        )
+
+        let writer = FileDragSourceView.pasteboardWriter(for: entry)
+
+        XCTAssertTrue(writer is NSURL)
+        XCTAssertTrue(
+            writer.writableTypes(for: NSPasteboard(name: .drag)).contains(.fileURL)
+        )
+    }
+
     func testDropViewRegistersEveryFilePromiseType() {
         let view = ShelfDropTarget.DropView(frame: .zero)
         let promiseTypes = NSFilePromiseReceiver.readableDraggedTypes.map {

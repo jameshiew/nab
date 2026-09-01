@@ -3,7 +3,7 @@ import SwiftUI
 
 struct ShelfView: View {
     @Bindable var model: ShelfModel
-    let exportCoordinator: FilePromiseExportCoordinator
+    let exportCoordinator: FileExportCoordinator
     let materializedFileStore: MaterializedFileStore
     var onDropReceived: () -> Void = {}
     var onPromiseDropStarted: () -> Void = {}

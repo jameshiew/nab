@@ -12,13 +12,10 @@ final class ShelfController {
         model = ShelfModel(materializedFileStore: materializedFileStore)
     }
 
-    private lazy var exportCoordinator = FilePromiseExportCoordinator(
+    private lazy var exportCoordinator = FileExportCoordinator(
         materializedFileStore: materializedFileStore,
         onItemsExported: { [weak self] itemIDs in
             self?.model.remove(ids: itemIDs)
-        },
-        onFailure: { [weak self] failure in
-            self?.presentExportFailure(failure)
         }
     )
     private lazy var panel: ShelfPanel = {
@@ -39,8 +36,6 @@ final class ShelfController {
     private var inDrag = false
     private var pendingPromiseDropCount = 0
     private var cursorInsideShelf = false
-    private var pendingExportFailures: [FilePromiseExportFailure] = []
-    private var isPresentingExportFailure = false
 
     private static let emptyHideDelay: Duration = .milliseconds(400)
 
@@ -105,34 +100,6 @@ final class ShelfController {
     private func promiseDropFinished() {
         pendingPromiseDropCount = max(0, pendingPromiseDropCount - 1)
         updateHideSchedule()
-    }
-
-    private func presentExportFailure(_ failure: FilePromiseExportFailure) {
-        Log.shelf.error(
-            "Failed to export \(failure.sourceURL.path, privacy: .private(mask: .hash)): \(failure.errorDescription, privacy: .private)"
-        )
-        pendingExportFailures.append(failure)
-        presentNextExportFailure()
-    }
-
-    private func presentNextExportFailure() {
-        guard !isPresentingExportFailure, !pendingExportFailures.isEmpty else { return }
-        let failure = pendingExportFailures.removeFirst()
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Couldn’t Export \(failure.sourceURL.lastPathComponent)"
-        alert.informativeText =
-            "\(failure.errorDescription)\n\nThe item remains on the shelf so you can try again."
-        alert.addButton(withTitle: "OK")
-        isPresentingExportFailure = true
-        NSApp.activate()
-        alert.beginSheetModal(for: panel) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.isPresentingExportFailure = false
-                self.presentNextExportFailure()
-            }
-        }
     }
 
     private func updateHideSchedule() {
