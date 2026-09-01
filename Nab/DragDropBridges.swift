@@ -120,6 +120,8 @@ final class FileDragSourceView: NSView, NSDraggingSource {
     private var cursorInsideShelf = true
     private var didForceClick = false
     private var draggedIDs: [ShelfItem.ID] = []
+    private var filePromiseDelegates: [MaterializedFilePromiseDelegate] = []
+    private var dragContainsMaterializedFiles = false
     private static let dragThreshold: CGFloat = 3
 
     override init(frame frameRect: NSRect) {
@@ -236,6 +238,8 @@ final class FileDragSourceView: NSView, NSDraggingSource {
 
         var dragItems: [NSDraggingItem] = []
         var successfulIDs: [ShelfItem.ID] = []
+        filePromiseDelegates = []
+        dragContainsMaterializedFiles = false
         let dragSize: CGFloat = 48
         let clickLocation = convert(event.locationInWindow, from: nil)
         // Stack offset is global across all dragged files so a multi-item
@@ -246,8 +250,12 @@ final class FileDragSourceView: NSView, NSDraggingSource {
             let urls = model.resolveURLs(for: shelfItem.id)
             // resolveURLs auto-removes an item whose files have all gone missing.
             if urls.isEmpty { continue }
+            guard let resolvedItem = model.items.first(where: { $0.id == shelfItem.id }) else {
+                continue
+            }
             let isClickedItem = shelfItem.id == itemID
-            for (entryIdx, url) in urls.enumerated() {
+            for (entryIdx, entry) in resolvedItem.entries.enumerated() {
+                let url = entry.url
                 let isPrimary = isClickedItem && entryIdx == 0
                 let image: NSImage = {
                     if isPrimary, let dragImage, let copy = dragImage.copy() as? NSImage {
@@ -258,7 +266,22 @@ final class FileDragSourceView: NSView, NSDraggingSource {
                     icon.size = NSSize(width: dragSize, height: dragSize)
                     return icon
                 }()
-                let draggingItem = NSDraggingItem(pasteboardWriter: url as NSURL)
+                let pasteboardWriter: NSPasteboardWriting
+                if entry.isMaterializedByNab {
+                    let delegate = MaterializedFilePromiseDelegate(sourceURL: url)
+                    filePromiseDelegates.append(delegate)
+                    dragContainsMaterializedFiles = true
+                    let fileType =
+                        UTType(filenameExtension: url.pathExtension)?.identifier
+                        ?? UTType.data.identifier
+                    pasteboardWriter = NSFilePromiseProvider(
+                        fileType: fileType,
+                        delegate: delegate
+                    )
+                } else {
+                    pasteboardWriter = url as NSURL
+                }
+                let draggingItem = NSDraggingItem(pasteboardWriter: pasteboardWriter)
                 let offset: CGFloat = isPrimary ? 0 : CGFloat(stackIndex) * 4
                 draggingItem.setDraggingFrame(
                     NSRect(
@@ -316,7 +339,9 @@ final class FileDragSourceView: NSView, NSDraggingSource {
         _ session: NSDraggingSession,
         sourceOperationMaskFor context: NSDraggingContext
     ) -> NSDragOperation {
-        [.move, .copy]
+        DragOperationPolicy.sourceMask(
+            containsMaterializedFiles: dragContainsMaterializedFiles
+        )
     }
 
     func draggingSession(
@@ -339,7 +364,37 @@ final class FileDragSourceView: NSView, NSDraggingSource {
             model?.remove(ids: draggedIDs)
         }
         draggedIDs = []
+        filePromiseDelegates = []
+        dragContainsMaterializedFiles = false
         onDragEnded()
+    }
+}
+
+final class MaterializedFilePromiseDelegate: NSObject, NSFilePromiseProviderDelegate {
+    let sourceURL: URL
+
+    init(sourceURL: URL) {
+        self.sourceURL = sourceURL
+    }
+
+    func filePromiseProvider(
+        _ filePromiseProvider: NSFilePromiseProvider,
+        fileNameForType fileType: String
+    ) -> String {
+        sourceURL.lastPathComponent
+    }
+
+    nonisolated func filePromiseProvider(
+        _ filePromiseProvider: NSFilePromiseProvider,
+        writePromiseTo url: URL,
+        completionHandler: @escaping (Error?) -> Void
+    ) {
+        do {
+            try FileManager.default.copyItem(at: sourceURL, to: url)
+            completionHandler(nil)
+        } catch {
+            completionHandler(error)
+        }
     }
 }
 

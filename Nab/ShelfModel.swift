@@ -97,26 +97,20 @@ final class ShelfModel {
     }
 
     func remove(_ id: ShelfItem.ID) {
-        let removedItems = items.filter { $0.id == id }
         items.removeAll { $0.id == id }
-        Self.removeMaterializedFiles(for: removedItems)
         selectedIDs.remove(id)
         if selectionAnchor == id { selectionAnchor = nil }
     }
 
     func remove(ids: [ShelfItem.ID]) {
         let set = Set(ids)
-        let removedItems = items.filter { set.contains($0.id) }
         items.removeAll { set.contains($0.id) }
-        Self.removeMaterializedFiles(for: removedItems)
         selectedIDs.subtract(set)
         if let anchor = selectionAnchor, set.contains(anchor) { selectionAnchor = nil }
     }
 
     func clear() {
-        let removedItems = items
         items.removeAll()
-        Self.removeMaterializedFiles(for: removedItems)
         selectedIDs.removeAll()
         selectionAnchor = nil
     }
@@ -228,21 +222,4 @@ final class ShelfModel {
         try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
     }
 
-    private static func removeMaterializedFiles(for items: [ShelfItem]) {
-        let urls = Set(
-            items.flatMap { item in
-                item.entries.lazy.filter(\.isMaterializedByNab).map { $0.url.standardizedFileURL }
-            }
-        )
-        let manager = FileManager.default
-        for url in urls where manager.fileExists(atPath: url.path) {
-            do {
-                try manager.removeItem(at: url)
-            } catch {
-                Log.shelf.error(
-                    "Failed to remove materialized image at \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)"
-                )
-            }
-        }
-    }
 }

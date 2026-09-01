@@ -14,7 +14,7 @@ final class ShelfModelTests: XCTestCase {
         XCTAssertTrue(model.items[0].entries[0].isMaterializedByNab)
     }
 
-    func testRemoveDeletesOnlyMaterializedFiles() throws {
+    func testRemovePreservesFiles() throws {
         let materializedURL = try makeTemporaryFile(named: "materialized.png")
         let userURL = try makeTemporaryFile(named: "user.png")
         let item = ShelfItem(
@@ -28,11 +28,11 @@ final class ShelfModelTests: XCTestCase {
 
         model.remove(item.id)
 
-        XCTAssertFalse(FileManager.default.fileExists(atPath: materializedURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: materializedURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: userURL.path))
     }
 
-    func testRemoveIDsDeletesOnlyFilesForRemovedItems() throws {
+    func testRemoveIDsPreservesMaterializedFiles() throws {
         let removedURL = try makeTemporaryFile(named: "removed.png")
         let keptURL = try makeTemporaryFile(named: "kept.png")
         let removedItem = ShelfItem(
@@ -46,11 +46,11 @@ final class ShelfModelTests: XCTestCase {
 
         model.remove(ids: [removedItem.id])
 
-        XCTAssertFalse(FileManager.default.fileExists(atPath: removedURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: removedURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: keptURL.path))
     }
 
-    func testClearDeletesAllMaterializedFiles() throws {
+    func testClearPreservesMaterializedFiles() throws {
         let firstURL = try makeTemporaryFile(named: "first.png")
         let secondURL = try makeTemporaryFile(named: "second.png")
         let model = ShelfModel()
@@ -61,8 +61,8 @@ final class ShelfModelTests: XCTestCase {
 
         model.clear()
 
-        XCTAssertFalse(FileManager.default.fileExists(atPath: firstURL.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: secondURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: firstURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secondURL.path))
     }
 
     private func makeTemporaryFile(named name: String) throws -> URL {
