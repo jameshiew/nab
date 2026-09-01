@@ -35,13 +35,16 @@ final class FilePromiseExportCoordinator {
 
     private var exports: [ExportID: ExportState] = [:]
     private var promises: [UUID: PromiseState] = [:]
+    private let materializedFileStore: MaterializedFileStore
     private let onItemsExported: ([ShelfItem.ID]) -> Void
     private let onFailure: (FilePromiseExportFailure) -> Void
 
     init(
+        materializedFileStore: MaterializedFileStore = .shared,
         onItemsExported: @escaping ([ShelfItem.ID]) -> Void,
         onFailure: @escaping (FilePromiseExportFailure) -> Void
     ) {
+        self.materializedFileStore = materializedFileStore
         self.onItemsExported = onItemsExported
         self.onFailure = onFailure
     }
@@ -68,7 +71,9 @@ final class FilePromiseExportCoordinator {
         }
 
         let promiseID = UUID()
+        let readLease = materializedFileStore.beginReading(sourceURL)
         let delegate = MaterializedFilePromiseDelegate(sourceURL: sourceURL) { [weak self] error in
+            readLease?.finish()
             Task { @MainActor [weak self] in
                 self?.promiseDidComplete(promiseID, error: error)
             }

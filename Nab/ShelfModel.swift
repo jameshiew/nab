@@ -29,6 +29,11 @@ final class ShelfModel {
     var items: [ShelfItem] = []
     var selectedIDs: Set<ShelfItem.ID> = []
     private var selectionAnchor: ShelfItem.ID?
+    @ObservationIgnored private let materializedFileStore: MaterializedFileStore
+
+    init(materializedFileStore: MaterializedFileStore = .shared) {
+        self.materializedFileStore = materializedFileStore
+    }
 
     /// Adds URLs as a single shelf item — a stack if more than one remains after
     /// filtering out files already on the shelf. Returns how many files were
@@ -98,22 +103,31 @@ final class ShelfModel {
     }
 
     func remove(_ id: ShelfItem.ID) {
+        let removedEntries = items.first(where: { $0.id == id })?.entries ?? []
         items.removeAll { $0.id == id }
         selectedIDs.remove(id)
         if selectionAnchor == id { selectionAnchor = nil }
+        trashMaterializedFiles(in: removedEntries)
     }
 
     func remove(ids: [ShelfItem.ID]) {
         let set = Set(ids)
+        let removedEntries =
+            items
+            .filter { set.contains($0.id) }
+            .flatMap(\.entries)
         items.removeAll { set.contains($0.id) }
         selectedIDs.subtract(set)
         if let anchor = selectionAnchor, set.contains(anchor) { selectionAnchor = nil }
+        trashMaterializedFiles(in: removedEntries)
     }
 
     func clear() {
+        let removedEntries = items.flatMap(\.entries)
         items.removeAll()
         selectedIDs.removeAll()
         selectionAnchor = nil
+        trashMaterializedFiles(in: removedEntries)
     }
 
     func isSelected(_ id: ShelfItem.ID) -> Bool {
@@ -223,4 +237,8 @@ final class ShelfModel {
         try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
     }
 
+    private func trashMaterializedFiles(in entries: [FileEntry]) {
+        let urls = entries.filter(\.isMaterializedByNab).map(\.url)
+        materializedFileStore.moveToTrash(urls)
+    }
 }

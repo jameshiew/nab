@@ -6,6 +6,57 @@ import XCTest
 
 @MainActor
 final class FilePromiseExportCoordinatorTests: XCTestCase {
+    func testDiscardWaitsForPromisedCopyToComplete() async throws {
+        let applicationSupportURL = try makeTemporaryDirectory()
+        let destinationDirectory = try makeTemporaryDirectory()
+        let store = MaterializedFileStore(
+            applicationSupportURL: applicationSupportURL,
+            trashItem: { url in try FileManager.default.removeItem(at: url) }
+        )
+        let source = store.droppedImageURL(
+            filename: "Screenshot 2026-09-01 at 12.00.00-\(UUID().uuidString).png"
+        )
+        try FileManager.default.createDirectory(
+            at: source.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("source".utf8).write(to: source)
+        let copy = destinationDirectory.appendingPathComponent("copy.png")
+        let item = ShelfItem(entries: [FileEntry(url: source, isMaterializedByNab: true)])
+        let model = ShelfModel(materializedFileStore: store)
+        model.items = [item]
+        let didExport = expectation(description: "item exported")
+        let coordinator = FilePromiseExportCoordinator(
+            materializedFileStore: store,
+            onItemsExported: { itemIDs in
+                model.remove(ids: itemIDs)
+                didExport.fulfill()
+            },
+            onFailure: { _ in XCTFail("Unexpected export failure") }
+        )
+
+        let exportID = coordinator.beginExport()
+        coordinator.registerItem(item.id, in: exportID)
+        let delegate = coordinator.makePromiseDelegate(
+            sourceURL: source,
+            itemID: item.id,
+            in: exportID
+        )
+        let provider = NSFilePromiseProvider(fileType: "public.png", delegate: delegate)
+        coordinator.finishExport(exportID, operation: .copy)
+
+        model.remove(item.id)
+        store.waitForPendingOperations()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+
+        delegate.filePromiseProvider(provider, writePromiseTo: copy) { XCTAssertNil($0) }
+        await fulfillment(of: [didExport], timeout: 1)
+        store.waitForPendingOperations()
+
+        XCTAssertEqual(try Data(contentsOf: copy), Data("source".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+    }
+
     func testAcceptedExportWaitsForEveryPromiseBeforeRemovingItem() async throws {
         let directory = try makeTemporaryDirectory()
         let firstSource = try makeFile(named: "first.png", in: directory)

@@ -4,8 +4,16 @@ import SwiftUI
 
 @MainActor
 final class ShelfController {
-    private let model = ShelfModel()
+    private let materializedFileStore: MaterializedFileStore
+    private let model: ShelfModel
+
+    init(materializedFileStore: MaterializedFileStore = .shared) {
+        self.materializedFileStore = materializedFileStore
+        model = ShelfModel(materializedFileStore: materializedFileStore)
+    }
+
     private lazy var exportCoordinator = FilePromiseExportCoordinator(
+        materializedFileStore: materializedFileStore,
         onItemsExported: { [weak self] itemIDs in
             self?.model.remove(ids: itemIDs)
         },
@@ -17,6 +25,7 @@ final class ShelfController {
         let view = ShelfView(
             model: model,
             exportCoordinator: exportCoordinator,
+            materializedFileStore: materializedFileStore,
             onDropReceived: { [weak self] in self?.handleDrop() },
             onPromiseDropStarted: { [weak self] in self?.promiseDropStarted() },
             onPromiseDropFinished: { [weak self] in self?.promiseDropFinished() },
@@ -36,6 +45,7 @@ final class ShelfController {
     private static let emptyHideDelay: Duration = .milliseconds(400)
 
     func start() {
+        materializedFileStore.trashAbandonedMaterializations()
         dragMonitor.dragStarted = { [weak self] in self?.onDragStarted() }
         dragMonitor.dragEnded = { [weak self] in self?.onDragEnded() }
         dragMonitor.dragMoved = { [weak self] point in self?.onDragMoved(at: point) }
@@ -47,6 +57,8 @@ final class ShelfController {
     func stop() {
         cancelHide()
         dragMonitor.stop()
+        model.clear()
+        materializedFileStore.waitForPendingOperations()
     }
 
     private func observeItems() {

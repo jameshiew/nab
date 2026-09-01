@@ -384,12 +384,14 @@ final class FileDragSourceView: NSView, NSDraggingSource {
 /// `.onDrop(of:)` filters the NSItemProvider to the most specific accepted type
 /// and strips the file URL for items like PNG files from Finder.
 struct ShelfDropTarget: NSViewRepresentable {
+    let materializedFileStore: MaterializedFileStore
     let onDrop: ([FileEntry]) -> Void
     let onPromiseDropStarted: () -> Void
     let onPromiseDropFinished: () -> Void
 
     func makeNSView(context: Context) -> DropView {
         let view = DropView()
+        view.materializedFileStore = materializedFileStore
         view.onDrop = onDrop
         view.onPromiseDropStarted = onPromiseDropStarted
         view.onPromiseDropFinished = onPromiseDropFinished
@@ -397,18 +399,21 @@ struct ShelfDropTarget: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: DropView, context: Context) {
+        nsView.materializedFileStore = materializedFileStore
         nsView.onDrop = onDrop
         nsView.onPromiseDropStarted = onPromiseDropStarted
         nsView.onPromiseDropFinished = onPromiseDropFinished
     }
 
     final class DropView: NSView {
+        var materializedFileStore: MaterializedFileStore = .shared
         var onDrop: ([FileEntry]) -> Void = { _ in }
         var onPromiseDropStarted: () -> Void = {}
         var onPromiseDropFinished: () -> Void = {}
 
         private struct PromiseDrop {
             let receivers: [NSFilePromiseReceiver]
+            let destinationURL: URL
             var pendingReceiverIDs: Set<UUID>
             var entries: [FileEntry] = []
         }
@@ -491,7 +496,7 @@ struct ShelfDropTarget: NSViewRepresentable {
                     images.append(
                         PendingImage(
                             data: data,
-                            destinationURL: Self.droppedImageURL(pathExtension: ext)
+                            destinationURL: droppedImageURL(pathExtension: ext)
                         )
                     )
                     break
@@ -530,7 +535,7 @@ struct ShelfDropTarget: NSViewRepresentable {
 
             let destination: URL
             do {
-                destination = try Self.promisedFileDirectory()
+                destination = try materializedFileStore.createPromisedFileDirectory()
             } catch {
                 Log.shelf.error(
                     "Failed to prepare promised-file drop: \(error.localizedDescription, privacy: .public)"
@@ -542,6 +547,7 @@ struct ShelfDropTarget: NSViewRepresentable {
             let receiverIDs = receivers.map { _ in UUID() }
             promiseDrops[dropID] = PromiseDrop(
                 receivers: receivers,
+                destinationURL: destination,
                 pendingReceiverIDs: Set(receiverIDs)
             )
             onPromiseDropStarted()
@@ -637,6 +643,7 @@ struct ShelfDropTarget: NSViewRepresentable {
 
             promiseDrops.removeValue(forKey: dropID)
             if drop.entries.isEmpty {
+                materializedFileStore.moveToTrash([drop.destinationURL])
                 ShelfFeedback.rejectedDrop()
             } else {
                 onDrop(drop.entries)
@@ -644,10 +651,10 @@ struct ShelfDropTarget: NSViewRepresentable {
             onPromiseDropFinished()
         }
 
-        private static func droppedImageURL(pathExtension: String) -> URL {
+        private func droppedImageURL(pathExtension: String) -> URL {
             let filename =
-                "Screenshot \(screenshotFormatter.string(from: Date()))-\(UUID().uuidString).\(pathExtension)"
-            return materializedImageDirectoryURL().appendingPathComponent(filename)
+                "Screenshot \(Self.screenshotFormatter.string(from: Date()))-\(UUID().uuidString).\(pathExtension)"
+            return materializedFileStore.droppedImageURL(filename: filename)
         }
 
         private static func fileURLs(from pasteboard: NSPasteboard) -> [URL] {
@@ -665,30 +672,5 @@ struct ShelfDropTarget: NSViewRepresentable {
             .filter { FileManager.default.fileExists(atPath: $0.path) }
         }
 
-        private static func materializedImageDirectoryURL() -> URL {
-            let manager = FileManager.default
-            let baseURL =
-                manager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-                ?? manager.temporaryDirectory
-            let directory =
-                baseURL
-                .appendingPathComponent("Nab", isDirectory: true)
-                .appendingPathComponent("Dropped Images", isDirectory: true)
-            return directory
-        }
-
-        private static func promisedFileDirectory() throws -> URL {
-            let manager = FileManager.default
-            let baseURL =
-                manager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-                ?? manager.temporaryDirectory
-            let directory =
-                baseURL
-                .appendingPathComponent("Nab", isDirectory: true)
-                .appendingPathComponent("Dropped Files", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true)
-            try manager.createDirectory(at: directory, withIntermediateDirectories: true)
-            return directory
-        }
     }
 }

@@ -24,6 +24,7 @@
 		D00F000000000000000000AF /* ScreenGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00F000000000000000000AF /* ScreenGeometry.swift */; };
 		D010000000000000000000B0 /* PanelGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = C010000000000000000000B0 /* PanelGeometry.swift */; };
 		D011000000000000000000B1 /* FilePromiseExportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C011000000000000000000B1 /* FilePromiseExportCoordinator.swift */; };
+		D012000000000000000000B2 /* MaterializedFileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C012000000000000000000B2 /* MaterializedFileStore.swift */; };
 		D10000000000000000000100 /* DragOperationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000100 /* DragOperationPolicyTests.swift */; };
 		D10100000000000000000101 /* ScreenGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10100000000000000000101 /* ScreenGeometryTests.swift */; };
 		D10200000000000000000102 /* ShelfModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10200000000000000000102 /* ShelfModelTests.swift */; };
@@ -62,6 +63,7 @@
 		C00F000000000000000000AF /* ScreenGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenGeometry.swift; sourceTree = "<group>"; };
 		C010000000000000000000B0 /* PanelGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelGeometry.swift; sourceTree = "<group>"; };
 		C011000000000000000000B1 /* FilePromiseExportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilePromiseExportCoordinator.swift; sourceTree = "<group>"; };
+		C012000000000000000000B2 /* MaterializedFileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaterializedFileStore.swift; sourceTree = "<group>"; };
 		C10000000000000000000100 /* DragOperationPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DragOperationPolicyTests.swift; sourceTree = "<group>"; };
 		C10100000000000000000101 /* ScreenGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenGeometryTests.swift; sourceTree = "<group>"; };
 		C10200000000000000000102 /* ShelfModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfModelTests.swift; sourceTree = "<group>"; };
@@ -113,6 +115,7 @@
 				C00F000000000000000000AF /* ScreenGeometry.swift */,
 				C010000000000000000000B0 /* PanelGeometry.swift */,
 				C011000000000000000000B1 /* FilePromiseExportCoordinator.swift */,
+				C012000000000000000000B2 /* MaterializedFileStore.swift */,
 				C007000000000000000000A7 /* DragMonitor.swift */,
 				C009000000000000000000A9 /* ShelfPreferences.swift */,
 				C008000000000000000000A8 /* Logging.swift */,
@@ -278,6 +281,7 @@
 				D00F000000000000000000AF /* ScreenGeometry.swift in Sources */,
 				D010000000000000000000B0 /* PanelGeometry.swift in Sources */,
 				D011000000000000000000B1 /* FilePromiseExportCoordinator.swift in Sources */,
+				D012000000000000000000B2 /* MaterializedFileStore.swift in Sources */,
 				D007000000000000000000A7 /* DragMonitor.swift in Sources */,
 				D009000000000000000000A9 /* ShelfPreferences.swift in Sources */,
 				D008000000000000000000A8 /* Logging.swift in Sources */,

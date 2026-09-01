@@ -4,6 +4,7 @@ import SwiftUI
 struct ShelfView: View {
     @Bindable var model: ShelfModel
     let exportCoordinator: FilePromiseExportCoordinator
+    let materializedFileStore: MaterializedFileStore
     var onDropReceived: () -> Void = {}
     var onPromiseDropStarted: () -> Void = {}
     var onPromiseDropFinished: () -> Void = {}
@@ -24,6 +25,7 @@ struct ShelfView: View {
         )
         .background(
             ShelfDropTarget(
+                materializedFileStore: materializedFileStore,
                 onDrop: handleDrop,
                 onPromiseDropStarted: onPromiseDropStarted,
                 onPromiseDropFinished: onPromiseDropFinished
@@ -48,7 +50,7 @@ struct ShelfView: View {
                 .allowsHitTesting(false)
             Spacer()
             if !model.items.isEmpty {
-                Button(action: model.clear) {
+                Button(action: { model.clear() }) {
                     Image(systemName: "trash")
                         .font(.system(size: 10))
                 }
