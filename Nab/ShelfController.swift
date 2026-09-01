@@ -109,7 +109,7 @@ final class ShelfController {
 
     private func presentExportFailure(_ failure: FilePromiseExportFailure) {
         Log.shelf.error(
-            "Failed to export \(failure.sourceURL.path, privacy: .public): \(failure.errorDescription, privacy: .public)"
+            "Failed to export \(failure.sourceURL.path, privacy: .private(mask: .hash)): \(failure.errorDescription, privacy: .private)"
         )
         pendingExportFailures.append(failure)
         presentNextExportFailure()

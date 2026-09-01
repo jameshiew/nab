@@ -168,7 +168,7 @@ nonisolated final class MaterializedFileStore: @unchecked Sendable {
             try pruneEmptyPromisedFileDirectory(containing: url)
         } catch {
             logger.error(
-                "Failed to clean up \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                "Failed to clean up \(url.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private)"
             )
         }
     }

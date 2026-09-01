@@ -144,7 +144,9 @@ final class FileDragSourceView: NSView, NSDraggingSource {
             pendingClickAction = nil
             let urls = model.resolveURLs(for: itemID)
             for url in urls {
-                Log.shelf.debug("FileDragSource opening \(url.path, privacy: .public)")
+                Log.shelf.debug(
+                    "FileDragSource opening \(url.path, privacy: .private(mask: .hash))"
+                )
                 NSWorkspace.shared.open(url)
             }
             return
@@ -509,7 +511,7 @@ struct ShelfDropTarget: NSViewRepresentable {
                 defer { onPromiseDropFinished() }
                 for errorDescription in errorDescriptions {
                     Log.shelf.error(
-                        "Failed to materialize dropped image: \(errorDescription, privacy: .public)"
+                        "Failed to materialize dropped image: \(errorDescription, privacy: .private)"
                     )
                 }
                 guard !urls.isEmpty else {
@@ -538,7 +540,7 @@ struct ShelfDropTarget: NSViewRepresentable {
                 destination = try materializedFileStore.createPromisedFileDirectory()
             } catch {
                 Log.shelf.error(
-                    "Failed to prepare promised-file drop: \(error.localizedDescription, privacy: .public)"
+                    "Failed to prepare promised-file drop: \(error.localizedDescription, privacy: .private)"
                 )
                 return false
             }
@@ -613,14 +615,14 @@ struct ShelfDropTarget: NSViewRepresentable {
             let entry: FileEntry?
             if let error {
                 Log.shelf.error(
-                    "Failed to receive promised file: \(error.localizedDescription, privacy: .public)"
+                    "Failed to receive promised file: \(error.localizedDescription, privacy: .private)"
                 )
                 entry = nil
             } else if FileManager.default.fileExists(atPath: fileURL.path) {
                 entry = FileEntry(url: fileURL, isMaterializedByNab: true)
             } else {
                 Log.shelf.error(
-                    "Promised file is missing at \(fileURL.path, privacy: .public)"
+                    "Promised file is missing at \(fileURL.path, privacy: .private(mask: .hash))"
                 )
                 entry = nil
             }
