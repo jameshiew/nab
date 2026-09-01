@@ -79,6 +79,9 @@ final class DragOperationPolicyTests: XCTestCase {
             delegateCompletion.fulfill()
         }
         let provider = NSFilePromiseProvider(fileType: "public.png", delegate: delegate)
+        let operationQueue = delegate.operationQueue(for: provider)
+        XCTAssertFalse(operationQueue === OperationQueue.main)
+        XCTAssertEqual(operationQueue.maxConcurrentOperationCount, 1)
         var copyError: Error?
         delegate.filePromiseProvider(provider, writePromiseTo: destinationURL) {
             copyError = $0

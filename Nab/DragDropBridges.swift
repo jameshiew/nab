@@ -413,6 +413,11 @@ struct ShelfDropTarget: NSViewRepresentable {
             var entries: [FileEntry] = []
         }
 
+        struct PendingImage: Sendable {
+            let data: Data
+            let destinationURL: URL
+        }
+
         private static let imageTypes: [(NSPasteboard.PasteboardType, String)] = [
             (NSPasteboard.PasteboardType(UTType.png.identifier), "png"),
             (NSPasteboard.PasteboardType(UTType.jpeg.identifier), "jpg"),
@@ -430,6 +435,13 @@ struct ShelfDropTarget: NSViewRepresentable {
         private let filePromiseQueue: OperationQueue = {
             let queue = OperationQueue()
             queue.qualityOfService = .userInitiated
+            return queue
+        }()
+        private let imageWriteQueue: OperationQueue = {
+            let queue = OperationQueue()
+            queue.name = "dev.nab.dropped-image-write"
+            queue.qualityOfService = .userInitiated
+            queue.maxConcurrentOperationCount = 1
             return queue
         }()
         private var promiseDrops: [UUID: PromiseDrop] = [:]
@@ -463,20 +475,48 @@ struct ShelfDropTarget: NSViewRepresentable {
 
             entries.append(contentsOf: Self.fileURLs(from: pasteboard).map { FileEntry(url: $0) })
 
-            if entries.isEmpty {
-                for item in pasteboard.pasteboardItems ?? [] {
-                    for (type, ext) in Self.imageTypes where item.types.contains(type) {
-                        guard let data = item.data(forType: type),
-                            let url = Self.saveScreenshot(data: data, ext: ext)
-                        else { continue }
-                        entries.append(FileEntry(url: url, isMaterializedByNab: true))
-                        break
-                    }
-                }
+            if !entries.isEmpty {
+                onDrop(entries)
+                return true
             }
 
-            guard !entries.isEmpty else { return false }
-            onDrop(entries)
+            return receiveImages(from: pasteboard)
+        }
+
+        private func receiveImages(from pasteboard: NSPasteboard) -> Bool {
+            var images: [PendingImage] = []
+            for item in pasteboard.pasteboardItems ?? [] {
+                for (type, ext) in Self.imageTypes where item.types.contains(type) {
+                    guard let data = item.data(forType: type) else { continue }
+                    images.append(
+                        PendingImage(
+                            data: data,
+                            destinationURL: Self.droppedImageURL(pathExtension: ext)
+                        )
+                    )
+                    break
+                }
+            }
+            guard !images.isEmpty else { return false }
+
+            onPromiseDropStarted()
+            let writer = Self.imageWriter { [self] urls, errorDescriptions in
+                defer { onPromiseDropFinished() }
+                for errorDescription in errorDescriptions {
+                    Log.shelf.error(
+                        "Failed to materialize dropped image: \(errorDescription, privacy: .public)"
+                    )
+                }
+                guard !urls.isEmpty else {
+                    ShelfFeedback.rejectedDrop()
+                    return
+                }
+                onDrop(urls.map { FileEntry(url: $0, isMaterializedByNab: true) })
+            }
+            let pendingImages = images
+            imageWriteQueue.addOperation {
+                writer(pendingImages)
+            }
             return true
         }
 
@@ -534,6 +574,30 @@ struct ShelfDropTarget: NSViewRepresentable {
             }
         }
 
+        static nonisolated func imageWriter(
+            _ action: @escaping @MainActor @Sendable ([URL], [String]) -> Void
+        ) -> @Sendable ([PendingImage]) -> Void {
+            { images in
+                var writtenURLs: [URL] = []
+                var errorDescriptions: [String] = []
+                for image in images {
+                    do {
+                        try FileManager.default.createDirectory(
+                            at: image.destinationURL.deletingLastPathComponent(),
+                            withIntermediateDirectories: true
+                        )
+                        try image.data.write(to: image.destinationURL, options: .atomic)
+                        writtenURLs.append(image.destinationURL)
+                    } catch {
+                        errorDescriptions.append(error.localizedDescription)
+                    }
+                }
+                Task { @MainActor in
+                    action(writtenURLs, errorDescriptions)
+                }
+            }
+        }
+
         private func promisedFileDidArrive(
             _ fileURL: URL,
             error: Error?,
@@ -580,17 +644,10 @@ struct ShelfDropTarget: NSViewRepresentable {
             onPromiseDropFinished()
         }
 
-        private static func saveScreenshot(data: Data, ext: String) -> URL? {
-            let filename = "Screenshot \(screenshotFormatter.string(from: Date()))-\(UUID().uuidString).\(ext)"
-            do {
-                let directory = try materializedImageDirectory()
-                let url = directory.appendingPathComponent(filename)
-                try data.write(to: url, options: .atomic)
-                return url
-            } catch {
-                Log.shelf.error("Failed to materialize dropped image: \(error.localizedDescription, privacy: .public)")
-                return nil
-            }
+        private static func droppedImageURL(pathExtension: String) -> URL {
+            let filename =
+                "Screenshot \(screenshotFormatter.string(from: Date()))-\(UUID().uuidString).\(pathExtension)"
+            return materializedImageDirectoryURL().appendingPathComponent(filename)
         }
 
         private static func fileURLs(from pasteboard: NSPasteboard) -> [URL] {
@@ -608,7 +665,7 @@ struct ShelfDropTarget: NSViewRepresentable {
             .filter { FileManager.default.fileExists(atPath: $0.path) }
         }
 
-        private static func materializedImageDirectory() throws -> URL {
+        private static func materializedImageDirectoryURL() -> URL {
             let manager = FileManager.default
             let baseURL =
                 manager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -617,7 +674,6 @@ struct ShelfDropTarget: NSViewRepresentable {
                 baseURL
                 .appendingPathComponent("Nab", isDirectory: true)
                 .appendingPathComponent("Dropped Images", isDirectory: true)
-            try manager.createDirectory(at: directory, withIntermediateDirectories: true)
             return directory
         }
 

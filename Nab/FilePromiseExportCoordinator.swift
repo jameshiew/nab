@@ -155,6 +155,13 @@ final class FilePromiseExportCoordinator {
 final class MaterializedFilePromiseDelegate: NSObject, NSFilePromiseProviderDelegate {
     let sourceURL: URL
     private let onCompletion: @Sendable (Error?) -> Void
+    private static let fileWriteQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "dev.nab.file-promise-write"
+        queue.qualityOfService = .userInitiated
+        queue.maxConcurrentOperationCount = 1
+        return queue
+    }()
 
     init(sourceURL: URL, onCompletion: @escaping @Sendable (Error?) -> Void) {
         self.sourceURL = sourceURL
@@ -166,6 +173,10 @@ final class MaterializedFilePromiseDelegate: NSObject, NSFilePromiseProviderDele
         fileNameForType fileType: String
     ) -> String {
         sourceURL.lastPathComponent
+    }
+
+    func operationQueue(for filePromiseProvider: NSFilePromiseProvider) -> OperationQueue {
+        Self.fileWriteQueue
     }
 
     nonisolated func filePromiseProvider(
