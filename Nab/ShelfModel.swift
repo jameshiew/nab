@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 struct FileEntry: Hashable {
     var url: URL
