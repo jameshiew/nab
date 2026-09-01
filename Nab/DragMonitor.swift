@@ -1,23 +1,15 @@
 import AppKit
 
-/// Watches for system-wide drag sessions that carry file URLs.
+/// Watches for system-wide left-button drag sessions.
 /// Posts `dragStarted` once per drag, then `dragEnded` on mouse up.
 final class DragMonitor {
     var dragStarted: () -> Void = {}
     var dragEnded: () -> Void = {}
     var dragMoved: (NSPoint) -> Void = { _ in }
 
-    private let pasteboard = NSPasteboard(name: .drag)
-    private var baselineChangeCount: Int
     private var dragMonitor: Any?
     private var upMonitor: Any?
     private var inDrag = false
-    private var lastPoll: TimeInterval = 0
-    private static let pollInterval: TimeInterval = 0.03
-
-    init() {
-        baselineChangeCount = pasteboard.changeCount
-    }
 
     deinit {
         MainActor.assumeIsolated {
@@ -28,7 +20,6 @@ final class DragMonitor {
 
     func start() {
         guard dragMonitor == nil, upMonitor == nil else { return }
-        baselineChangeCount = pasteboard.changeCount
         dragMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged]) { [weak self] _ in
             self?.handleDrag()
         }
@@ -43,20 +34,11 @@ final class DragMonitor {
         dragMonitor = nil
         upMonitor = nil
         inDrag = false
-        baselineChangeCount = pasteboard.changeCount
     }
 
-    /// Call when the app itself has just finished a drag session. Because
-    /// `NSDraggingSession` consumes the events that would normally drive
-    /// `handleDrag`/`handleUp`, our monitor can be left with a stale baseline
-    /// (pasteboard was bumped by our own `beginDraggingSession`, but we never
-    /// observed the mouseUp that would resync it). Any later innocent drag in
-    /// another app would then look like a fresh file drag, because the drag
-    /// pasteboard still holds our file URL.
     func endOwnDrag() {
         let wasInDrag = inDrag
         inDrag = false
-        baselineChangeCount = pasteboard.changeCount
         if wasInDrag {
             dragEnded()
         }
@@ -67,15 +49,6 @@ final class DragMonitor {
             dragMoved(NSEvent.mouseLocation)
             return
         }
-        let now = ProcessInfo.processInfo.systemUptime
-        if now - lastPoll < Self.pollInterval { return }
-        lastPoll = now
-
-        let current = pasteboard.changeCount
-        guard current != baselineChangeCount else { return }
-        baselineChangeCount = current
-
-        guard pasteboardHoldsDraggableContent() else { return }
 
         inDrag = true
         dragStarted()
@@ -85,17 +58,6 @@ final class DragMonitor {
     private func handleUp() {
         guard inDrag else { return }
         inDrag = false
-        baselineChangeCount = pasteboard.changeCount
         dragEnded()
-    }
-
-    private func pasteboardHoldsDraggableContent() -> Bool {
-        let fileOptions: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
-        if pasteboard.canReadObject(forClasses: [NSURL.self], options: fileOptions) {
-            return true
-        }
-        // Screenshot thumbnails (Cmd+Shift+4) and dragged images expose image data
-        // rather than a file URL until materialized on drop.
-        return pasteboard.canReadObject(forClasses: [NSImage.self], options: [:])
     }
 }

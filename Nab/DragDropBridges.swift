@@ -385,19 +385,33 @@ final class FileDragSourceView: NSView, NSDraggingSource {
 /// and strips the file URL for items like PNG files from Finder.
 struct ShelfDropTarget: NSViewRepresentable {
     let onDrop: ([FileEntry]) -> Void
+    let onPromiseDropStarted: () -> Void
+    let onPromiseDropFinished: () -> Void
 
     func makeNSView(context: Context) -> DropView {
         let view = DropView()
         view.onDrop = onDrop
+        view.onPromiseDropStarted = onPromiseDropStarted
+        view.onPromiseDropFinished = onPromiseDropFinished
         return view
     }
 
     func updateNSView(_ nsView: DropView, context: Context) {
         nsView.onDrop = onDrop
+        nsView.onPromiseDropStarted = onPromiseDropStarted
+        nsView.onPromiseDropFinished = onPromiseDropFinished
     }
 
     final class DropView: NSView {
         var onDrop: ([FileEntry]) -> Void = { _ in }
+        var onPromiseDropStarted: () -> Void = {}
+        var onPromiseDropFinished: () -> Void = {}
+
+        private struct PromiseDrop {
+            let receivers: [NSFilePromiseReceiver]
+            var pendingReceiverIDs: Set<UUID>
+            var entries: [FileEntry] = []
+        }
 
         private static let imageTypes: [(NSPasteboard.PasteboardType, String)] = [
             (NSPasteboard.PasteboardType(UTType.png.identifier), "png"),
@@ -413,10 +427,19 @@ struct ShelfDropTarget: NSViewRepresentable {
             formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
             return formatter
         }()
+        private let filePromiseQueue: OperationQueue = {
+            let queue = OperationQueue()
+            queue.qualityOfService = .userInitiated
+            return queue
+        }()
+        private var promiseDrops: [UUID: PromiseDrop] = [:]
 
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
-            var types: [NSPasteboard.PasteboardType] = [.fileURL]
+            var types = NSFilePromiseReceiver.readableDraggedTypes.map {
+                NSPasteboard.PasteboardType($0)
+            }
+            types.append(.fileURL)
             types.append(contentsOf: Self.imageTypes.map(\.0))
             registerForDraggedTypes(types)
         }
@@ -431,13 +454,15 @@ struct ShelfDropTarget: NSViewRepresentable {
 
         override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
             let pasteboard = sender.draggingPasteboard
+
+            if receiveFilePromises(from: pasteboard) {
+                return true
+            }
+
             var entries: [FileEntry] = []
 
-            // Prefer file URLs when present — covers Finder drags of any file type.
             entries.append(contentsOf: Self.fileURLs(from: pasteboard).map { FileEntry(url: $0) })
 
-            // Fall back to image data — covers ad hoc screenshots (Cmd+Shift+4 thumbnail)
-            // and dragged images that expose no file URL on the pasteboard.
             if entries.isEmpty {
                 for item in pasteboard.pasteboardItems ?? [] {
                     for (type, ext) in Self.imageTypes where item.types.contains(type) {
@@ -453,6 +478,96 @@ struct ShelfDropTarget: NSViewRepresentable {
             guard !entries.isEmpty else { return false }
             onDrop(entries)
             return true
+        }
+
+        private func receiveFilePromises(from pasteboard: NSPasteboard) -> Bool {
+            let receivers =
+                pasteboard.readObjects(
+                    forClasses: [NSFilePromiseReceiver.self],
+                    options: nil
+                ) as? [NSFilePromiseReceiver] ?? []
+            guard !receivers.isEmpty else { return false }
+
+            let destination: URL
+            do {
+                destination = try Self.promisedFileDirectory()
+            } catch {
+                Log.shelf.error(
+                    "Failed to prepare promised-file drop: \(error.localizedDescription, privacy: .public)"
+                )
+                return false
+            }
+
+            let dropID = UUID()
+            let receiverIDs = receivers.map { _ in UUID() }
+            promiseDrops[dropID] = PromiseDrop(
+                receivers: receivers,
+                pendingReceiverIDs: Set(receiverIDs)
+            )
+            onPromiseDropStarted()
+            for (receiver, receiverID) in zip(receivers, receiverIDs) {
+                receiver.receivePromisedFiles(
+                    atDestination: destination,
+                    options: [:],
+                    operationQueue: filePromiseQueue
+                ) { [weak self] fileURL, error in
+                    Task { @MainActor [weak self] in
+                        self?.promisedFileDidArrive(
+                            fileURL,
+                            error: error,
+                            for: dropID,
+                            receiverID: receiverID
+                        )
+                    }
+                }
+            }
+            return true
+        }
+
+        private func promisedFileDidArrive(
+            _ fileURL: URL,
+            error: Error?,
+            for dropID: UUID,
+            receiverID: UUID
+        ) {
+            let entry: FileEntry?
+            if let error {
+                Log.shelf.error(
+                    "Failed to receive promised file: \(error.localizedDescription, privacy: .public)"
+                )
+                entry = nil
+            } else if FileManager.default.fileExists(atPath: fileURL.path) {
+                entry = FileEntry(url: fileURL, isMaterializedByNab: true)
+            } else {
+                Log.shelf.error(
+                    "Promised file is missing at \(fileURL.path, privacy: .public)"
+                )
+                entry = nil
+            }
+
+            guard var drop = promiseDrops[dropID] else {
+                if let entry {
+                    onDrop([entry])
+                }
+                return
+            }
+            drop.pendingReceiverIDs.remove(receiverID)
+            if let entry {
+                drop.entries.append(entry)
+            }
+
+            if !drop.pendingReceiverIDs.isEmpty {
+                promiseDrops[dropID] = drop
+                return
+            }
+
+            promiseDrops.removeValue(forKey: dropID)
+            if drop.entries.isEmpty {
+                ShelfFeedback.rejectedDrop()
+            } else {
+                onDrop(drop.entries)
+            }
+            onPromiseDropFinished()
         }
 
         private static func saveScreenshot(data: Data, ext: String) -> URL? {
@@ -492,6 +607,20 @@ struct ShelfDropTarget: NSViewRepresentable {
                 baseURL
                 .appendingPathComponent("Nab", isDirectory: true)
                 .appendingPathComponent("Dropped Images", isDirectory: true)
+            try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+            return directory
+        }
+
+        private static func promisedFileDirectory() throws -> URL {
+            let manager = FileManager.default
+            let baseURL =
+                manager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                ?? manager.temporaryDirectory
+            let directory =
+                baseURL
+                .appendingPathComponent("Nab", isDirectory: true)
+                .appendingPathComponent("Dropped Files", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
             try manager.createDirectory(at: directory, withIntermediateDirectories: true)
             return directory
         }

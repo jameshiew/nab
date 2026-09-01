@@ -18,6 +18,8 @@ final class ShelfController {
             model: model,
             exportCoordinator: exportCoordinator,
             onDropReceived: { [weak self] in self?.handleDrop() },
+            onPromiseDropStarted: { [weak self] in self?.promiseDropStarted() },
+            onPromiseDropFinished: { [weak self] in self?.promiseDropFinished() },
             onItemDragEnded: { [weak self] in self?.dragMonitor.endOwnDrag() },
             onHeaderDragEnded: { [weak self] in self?.panel.userDidFinishDragging() }
         )
@@ -26,6 +28,7 @@ final class ShelfController {
     private let dragMonitor = DragMonitor()
     private var hideTask: Task<Void, Never>?
     private var inDrag = false
+    private var pendingPromiseDropCount = 0
     private var cursorInsideShelf = false
     private var pendingExportFailures: [FilePromiseExportFailure] = []
     private var isPresentingExportFailure = false
@@ -82,6 +85,16 @@ final class ShelfController {
         cancelHide()
     }
 
+    private func promiseDropStarted() {
+        pendingPromiseDropCount += 1
+        cancelHide()
+    }
+
+    private func promiseDropFinished() {
+        pendingPromiseDropCount = max(0, pendingPromiseDropCount - 1)
+        updateHideSchedule()
+    }
+
     private func presentExportFailure(_ failure: FilePromiseExportFailure) {
         Log.shelf.error(
             "Failed to export \(failure.sourceURL.path, privacy: .public): \(failure.errorDescription, privacy: .public)"
@@ -111,7 +124,7 @@ final class ShelfController {
     }
 
     private func updateHideSchedule() {
-        if !inDrag && model.items.isEmpty {
+        if !inDrag && pendingPromiseDropCount == 0 && model.items.isEmpty {
             scheduleHide(after: Self.emptyHideDelay)
         } else {
             cancelHide()

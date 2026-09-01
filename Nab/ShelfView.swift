@@ -5,6 +5,8 @@ struct ShelfView: View {
     @Bindable var model: ShelfModel
     let exportCoordinator: FilePromiseExportCoordinator
     var onDropReceived: () -> Void = {}
+    var onPromiseDropStarted: () -> Void = {}
+    var onPromiseDropFinished: () -> Void = {}
     var onItemDragEnded: () -> Void = {}
     var onHeaderDragEnded: () -> Void = {}
 
@@ -20,7 +22,13 @@ struct ShelfView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(.white.opacity(0.08), lineWidth: 0.5)
         )
-        .background(ShelfDropTarget(onDrop: handleDrop))
+        .background(
+            ShelfDropTarget(
+                onDrop: handleDrop,
+                onPromiseDropStarted: onPromiseDropStarted,
+                onPromiseDropFinished: onPromiseDropFinished
+            )
+        )
     }
 
     private func handleDrop(_ entries: [FileEntry]) {
