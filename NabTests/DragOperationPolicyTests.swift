@@ -4,14 +4,43 @@ import XCTest
 @testable import Nab
 
 final class DragOperationPolicyTests: XCTestCase {
-    func testMaterializedFilesCanOnlyBeCopied() {
-        XCTAssertEqual(DragOperationPolicy.sourceMask(containsMaterializedFiles: true), .copy)
+    func testMaterializedFilesCanOnlyBeCopiedWithinApplication() {
+        XCTAssertEqual(
+            DragOperationPolicy.sourceMask(
+                for: .withinApplication,
+                containsMaterializedFiles: true
+            ),
+            .copy
+        )
     }
 
-    func testUserFilesCanBeMovedOrCopied() {
+    func testMaterializedFilesCanOnlyBeCopiedOutsideApplication() {
         XCTAssertEqual(
-            DragOperationPolicy.sourceMask(containsMaterializedFiles: false),
-            [.move, .copy]
+            DragOperationPolicy.sourceMask(
+                for: .outsideApplication,
+                containsMaterializedFiles: true
+            ),
+            .copy
+        )
+    }
+
+    func testUserFilesCanOnlyBeMovedWithinApplication() {
+        XCTAssertEqual(
+            DragOperationPolicy.sourceMask(
+                for: .withinApplication,
+                containsMaterializedFiles: false
+            ),
+            .move
+        )
+    }
+
+    func testUserFilesCanOnlyBeCopiedOutsideApplication() {
+        XCTAssertEqual(
+            DragOperationPolicy.sourceMask(
+                for: .outsideApplication,
+                containsMaterializedFiles: false
+            ),
+            .copy
         )
     }
 

@@ -340,6 +340,7 @@ final class FileDragSourceView: NSView, NSDraggingSource {
         sourceOperationMaskFor context: NSDraggingContext
     ) -> NSDragOperation {
         DragOperationPolicy.sourceMask(
+            for: context,
             containsMaterializedFiles: dragContainsMaterializedFiles
         )
     }
