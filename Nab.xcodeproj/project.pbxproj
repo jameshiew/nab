@@ -22,9 +22,11 @@
 		D00D000000000000000000AD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C00D000000000000000000AD /* Assets.xcassets */; };
 		D00E000000000000000000AE /* DragOperationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00E000000000000000000AE /* DragOperationPolicy.swift */; };
 		D00F000000000000000000AF /* ScreenGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00F000000000000000000AF /* ScreenGeometry.swift */; };
+		D010000000000000000000B0 /* PanelGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = C010000000000000000000B0 /* PanelGeometry.swift */; };
 		D10000000000000000000100 /* DragOperationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000100 /* DragOperationPolicyTests.swift */; };
 		D10100000000000000000101 /* ScreenGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10100000000000000000101 /* ScreenGeometryTests.swift */; };
 		D10200000000000000000102 /* ShelfModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10200000000000000000102 /* ShelfModelTests.swift */; };
+		D10300000000000000000103 /* PanelGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10300000000000000000103 /* PanelGeometryTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -55,9 +57,11 @@
 		C00D000000000000000000AD /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C00E000000000000000000AE /* DragOperationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DragOperationPolicy.swift; sourceTree = "<group>"; };
 		C00F000000000000000000AF /* ScreenGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenGeometry.swift; sourceTree = "<group>"; };
+		C010000000000000000000B0 /* PanelGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelGeometry.swift; sourceTree = "<group>"; };
 		C10000000000000000000100 /* DragOperationPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DragOperationPolicyTests.swift; sourceTree = "<group>"; };
 		C10100000000000000000101 /* ScreenGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenGeometryTests.swift; sourceTree = "<group>"; };
 		C10200000000000000000102 /* ShelfModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfModelTests.swift; sourceTree = "<group>"; };
+		C10300000000000000000103 /* PanelGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelGeometryTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -101,6 +105,7 @@
 				C00C000000000000000000AC /* QuickLookCoordinator.swift */,
 				C00E000000000000000000AE /* DragOperationPolicy.swift */,
 				C00F000000000000000000AF /* ScreenGeometry.swift */,
+				C010000000000000000000B0 /* PanelGeometry.swift */,
 				C007000000000000000000A7 /* DragMonitor.swift */,
 				C009000000000000000000A9 /* ShelfPreferences.swift */,
 				C008000000000000000000A8 /* Logging.swift */,
@@ -114,6 +119,7 @@
 			children = (
 				C10000000000000000000100 /* DragOperationPolicyTests.swift */,
 				C10100000000000000000101 /* ScreenGeometryTests.swift */,
+				C10300000000000000000103 /* PanelGeometryTests.swift */,
 				C10200000000000000000102 /* ShelfModelTests.swift */,
 			);
 			path = NabTests;
@@ -282,6 +288,7 @@
 				D00C000000000000000000AC /* QuickLookCoordinator.swift in Sources */,
 				D00E000000000000000000AE /* DragOperationPolicy.swift in Sources */,
 				D00F000000000000000000AF /* ScreenGeometry.swift in Sources */,
+				D010000000000000000000B0 /* PanelGeometry.swift in Sources */,
 				D007000000000000000000A7 /* DragMonitor.swift in Sources */,
 				D009000000000000000000A9 /* ShelfPreferences.swift in Sources */,
 				D008000000000000000000A8 /* Logging.swift in Sources */,
@@ -294,6 +301,7 @@
 			files = (
 				D10000000000000000000100 /* DragOperationPolicyTests.swift in Sources */,
 				D10100000000000000000101 /* ScreenGeometryTests.swift in Sources */,
+				D10300000000000000000103 /* PanelGeometryTests.swift in Sources */,
 				D10200000000000000000102 /* ShelfModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

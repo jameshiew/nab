@@ -55,8 +55,7 @@ final class ShelfPanel: NSPanel {
             ])
         }
 
-        setFrame(hiddenFrame, display: false)
-        orderFrontRegardless()
+        setFrame(edgeFrame, display: false)
 
         moveObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didMoveNotification,
@@ -99,14 +98,10 @@ final class ShelfPanel: NSPanel {
         return Self.defaultVisibleFrame(for: size)
     }
 
-    var hiddenFrame: NSRect {
-        let visible = visibleFrame
-        let screenFrame = Self.screenBestMatching(visible)?.frame ?? (NSScreen.main?.frame ?? .zero)
-        return NSRect(
-            x: screenFrame.maxX + Self.edgeInset,
-            y: visible.origin.y,
-            width: size.width,
-            height: size.height
+    var edgeFrame: NSRect {
+        PanelGeometry.frameAtNearestHorizontalEdge(
+            for: visibleFrame,
+            in: NSScreen.screens.map(\.frame)
         )
     }
 
@@ -128,14 +123,18 @@ final class ShelfPanel: NSPanel {
         let target = visibleFrame
         Log.shelf.debug("slideIn target=\(target.debugDescription, privacy: .public)")
         isShown = true
+        orderFrontRegardless()
         animate(to: target)
     }
 
     func slideOut() {
-        let target = hiddenFrame
+        let target = edgeFrame
         Log.shelf.debug("slideOut target=\(target.debugDescription, privacy: .public)")
         isShown = false
-        animate(to: target)
+        animate(to: target) { [weak self] in
+            guard let self, !self.isShown else { return }
+            self.orderOut(nil)
+        }
     }
 
     func updateHeight(forItemCount count: Int) {
@@ -156,16 +155,18 @@ final class ShelfPanel: NSPanel {
         if isShown {
             animate(to: visibleFrame)
         } else {
-            setFrame(hiddenFrame, display: false)
+            setFrame(edgeFrame, display: false)
         }
     }
 
-    private func animate(to frame: NSRect) {
+    private func animate(to frame: NSRect, completionHandler: (() -> Void)? = nil) {
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.22
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             ctx.allowsImplicitAnimation = true
             self.animator().setFrame(frame, display: true)
+        } completionHandler: {
+            completionHandler?()
         }
     }
 
