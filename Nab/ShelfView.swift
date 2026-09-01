@@ -22,9 +22,9 @@ struct ShelfView: View {
         .background(ShelfDropTarget(onDrop: handleDrop))
     }
 
-    private func handleDrop(_ urls: [URL]) {
-        guard !urls.isEmpty else { return }
-        let result = model.add(urls)
+    private func handleDrop(_ entries: [FileEntry]) {
+        guard !entries.isEmpty else { return }
+        let result = model.add(entries)
         if result.added == 0 && result.duplicates > 0 {
             ShelfFeedback.rejectedDrop()
         }

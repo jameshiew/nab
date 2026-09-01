@@ -2,7 +2,8 @@ import Foundation
 
 struct FileEntry: Hashable {
     var url: URL
-    var bookmarkData: Data?
+    var bookmarkData: Data? = nil
+    var isMaterializedByNab = false
 }
 
 struct ShelfItem: Identifiable, Hashable {
@@ -33,14 +34,22 @@ final class ShelfModel {
     /// added vs. rejected as duplicates.
     @discardableResult
     func add(_ urls: [URL]) -> (added: Int, duplicates: Int) {
+        add(urls.map { FileEntry(url: $0) })
+    }
+
+    @discardableResult
+    func add(_ candidates: [FileEntry]) -> (added: Int, duplicates: Int) {
         var existing = Set(items.flatMap { $0.entries.map { Self.duplicateKey(for: $0.url) } })
         var entries: [FileEntry] = []
         var duplicates = 0
-        for url in urls {
-            let fileURL = url.standardizedFileURL
+        for candidate in candidates {
+            let fileURL = candidate.url.standardizedFileURL
             let key = Self.duplicateKey(for: fileURL)
             if existing.insert(key).inserted {
-                entries.append(FileEntry(url: fileURL, bookmarkData: Self.bookmarkData(for: fileURL)))
+                var entry = candidate
+                entry.url = fileURL
+                entry.bookmarkData = Self.bookmarkData(for: fileURL)
+                entries.append(entry)
             } else {
                 duplicates += 1
             }
@@ -88,20 +97,26 @@ final class ShelfModel {
     }
 
     func remove(_ id: ShelfItem.ID) {
+        let removedItems = items.filter { $0.id == id }
         items.removeAll { $0.id == id }
+        Self.removeMaterializedFiles(for: removedItems)
         selectedIDs.remove(id)
         if selectionAnchor == id { selectionAnchor = nil }
     }
 
     func remove(ids: [ShelfItem.ID]) {
         let set = Set(ids)
+        let removedItems = items.filter { set.contains($0.id) }
         items.removeAll { set.contains($0.id) }
+        Self.removeMaterializedFiles(for: removedItems)
         selectedIDs.subtract(set)
         if let anchor = selectionAnchor, set.contains(anchor) { selectionAnchor = nil }
     }
 
     func clear() {
+        let removedItems = items
         items.removeAll()
+        Self.removeMaterializedFiles(for: removedItems)
         selectedIDs.removeAll()
         selectionAnchor = nil
     }
@@ -211,5 +226,23 @@ final class ShelfModel {
 
     private static func bookmarkData(for url: URL) -> Data? {
         try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+    }
+
+    private static func removeMaterializedFiles(for items: [ShelfItem]) {
+        let urls = Set(
+            items.flatMap { item in
+                item.entries.lazy.filter(\.isMaterializedByNab).map { $0.url.standardizedFileURL }
+            }
+        )
+        let manager = FileManager.default
+        for url in urls where manager.fileExists(atPath: url.path) {
+            do {
+                try manager.removeItem(at: url)
+            } catch {
+                Log.shelf.error(
+                    "Failed to remove materialized image at \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
     }
 }

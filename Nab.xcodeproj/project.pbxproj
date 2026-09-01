@@ -24,6 +24,7 @@
 		D00F000000000000000000AF /* ScreenGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00F000000000000000000AF /* ScreenGeometry.swift */; };
 		D10000000000000000000100 /* DragOperationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000100 /* DragOperationPolicyTests.swift */; };
 		D10100000000000000000101 /* ScreenGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10100000000000000000101 /* ScreenGeometryTests.swift */; };
+		D10200000000000000000102 /* ShelfModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10200000000000000000102 /* ShelfModelTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -56,6 +57,7 @@
 		C00F000000000000000000AF /* ScreenGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenGeometry.swift; sourceTree = "<group>"; };
 		C10000000000000000000100 /* DragOperationPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DragOperationPolicyTests.swift; sourceTree = "<group>"; };
 		C10100000000000000000101 /* ScreenGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenGeometryTests.swift; sourceTree = "<group>"; };
+		C10200000000000000000102 /* ShelfModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfModelTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -112,6 +114,7 @@
 			children = (
 				C10000000000000000000100 /* DragOperationPolicyTests.swift */,
 				C10100000000000000000101 /* ScreenGeometryTests.swift */,
+				C10200000000000000000102 /* ShelfModelTests.swift */,
 			);
 			path = NabTests;
 			sourceTree = "<group>";
@@ -291,6 +294,7 @@
 			files = (
 				D10000000000000000000100 /* DragOperationPolicyTests.swift in Sources */,
 				D10100000000000000000101 /* ScreenGeometryTests.swift in Sources */,
+				D10200000000000000000102 /* ShelfModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

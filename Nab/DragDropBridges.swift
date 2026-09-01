@@ -350,7 +350,7 @@ final class FileDragSourceView: NSView, NSDraggingSource {
 /// `.onDrop(of:)` filters the NSItemProvider to the most specific accepted type
 /// and strips the file URL for items like PNG files from Finder.
 struct ShelfDropTarget: NSViewRepresentable {
-    let onDrop: ([URL]) -> Void
+    let onDrop: ([FileEntry]) -> Void
 
     func makeNSView(context: Context) -> DropView {
         let view = DropView()
@@ -363,7 +363,7 @@ struct ShelfDropTarget: NSViewRepresentable {
     }
 
     final class DropView: NSView {
-        var onDrop: ([URL]) -> Void = { _ in }
+        var onDrop: ([FileEntry]) -> Void = { _ in }
 
         private static let imageTypes: [(NSPasteboard.PasteboardType, String)] = [
             (NSPasteboard.PasteboardType(UTType.png.identifier), "png"),
@@ -397,27 +397,27 @@ struct ShelfDropTarget: NSViewRepresentable {
 
         override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
             let pasteboard = sender.draggingPasteboard
-            var urls: [URL] = []
+            var entries: [FileEntry] = []
 
             // Prefer file URLs when present — covers Finder drags of any file type.
-            urls.append(contentsOf: Self.fileURLs(from: pasteboard))
+            entries.append(contentsOf: Self.fileURLs(from: pasteboard).map { FileEntry(url: $0) })
 
             // Fall back to image data — covers ad hoc screenshots (Cmd+Shift+4 thumbnail)
             // and dragged images that expose no file URL on the pasteboard.
-            if urls.isEmpty {
+            if entries.isEmpty {
                 for item in pasteboard.pasteboardItems ?? [] {
                     for (type, ext) in Self.imageTypes where item.types.contains(type) {
                         guard let data = item.data(forType: type),
                             let url = Self.saveScreenshot(data: data, ext: ext)
                         else { continue }
-                        urls.append(url)
+                        entries.append(FileEntry(url: url, isMaterializedByNab: true))
                         break
                     }
                 }
             }
 
-            guard !urls.isEmpty else { return false }
-            onDrop(urls)
+            guard !entries.isEmpty else { return false }
+            onDrop(entries)
             return true
         }
 
