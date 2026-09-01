@@ -407,8 +407,111 @@ struct ShelfDropTarget: NSViewRepresentable {
         private struct PromiseDrop {
             let receivers: [NSFilePromiseReceiver]
             let destinationURL: URL
-            var pendingReceiverIDs: Set<UUID>
-            var entries: [FileEntry] = []
+            var state: PromiseDropState
+        }
+
+        struct PromiseDropState {
+            private struct ReceivedFile {
+                let fileIndex: Int?
+                let entry: FileEntry?
+            }
+
+            private struct ReceiverState {
+                var fileNames: [String] = []
+                var expectedFileCount = 1
+                var receivedFiles: [ReceivedFile] = []
+                var claimedFileIndices: Set<Int> = []
+
+                var isComplete: Bool {
+                    receivedFiles.count >= expectedFileCount
+                }
+            }
+
+            private var receivers: [ReceiverState]
+
+            init(receiverCount: Int) {
+                receivers = (0..<receiverCount).map { _ in ReceiverState() }
+            }
+
+            mutating func configureReceiver(
+                at receiverIndex: Int,
+                fileNames: [String],
+                fileTypeCount: Int
+            ) {
+                precondition(receivers.indices.contains(receiverIndex))
+                precondition(receivers[receiverIndex].receivedFiles.isEmpty)
+                receivers[receiverIndex].fileNames = fileNames
+                receivers[receiverIndex].expectedFileCount = max(
+                    fileNames.count,
+                    fileTypeCount,
+                    1
+                )
+            }
+
+            @discardableResult
+            mutating func record(
+                _ entry: FileEntry?,
+                fileURL: URL,
+                for receiverIndex: Int
+            ) -> Bool {
+                precondition(receivers.indices.contains(receiverIndex))
+                var receiver = receivers[receiverIndex]
+                let wasExpected = receiver.receivedFiles.count < receiver.expectedFileCount
+                if !wasExpected {
+                    receiver.expectedFileCount += 1
+                }
+
+                let fileIndex: Int?
+                if entry != nil,
+                    let index = receiver.fileNames.indices.first(where: {
+                        !receiver.claimedFileIndices.contains($0)
+                            && receiver.fileNames[$0] == fileURL.lastPathComponent
+                    })
+                {
+                    receiver.claimedFileIndices.insert(index)
+                    fileIndex = index
+                } else {
+                    fileIndex = nil
+                }
+                receiver.receivedFiles.append(
+                    ReceivedFile(fileIndex: fileIndex, entry: entry)
+                )
+                receivers[receiverIndex] = receiver
+                return wasExpected
+            }
+
+            var isComplete: Bool {
+                receivers.allSatisfy(\.isComplete)
+            }
+
+            var orderedEntries: [FileEntry] {
+                receivers.flatMap { receiver in
+                    var entries = [FileEntry?](
+                        repeating: nil,
+                        count: receiver.expectedFileCount
+                    )
+                    var unmatchedEntries: [FileEntry] = []
+                    for receivedFile in receiver.receivedFiles {
+                        guard let entry = receivedFile.entry else { continue }
+                        if let fileIndex = receivedFile.fileIndex,
+                            entries.indices.contains(fileIndex),
+                            entries[fileIndex] == nil
+                        {
+                            entries[fileIndex] = entry
+                        } else {
+                            unmatchedEntries.append(entry)
+                        }
+                    }
+                    for entry in unmatchedEntries {
+                        if let index = entries.firstIndex(where: { $0 == nil }) {
+                            entries[index] = entry
+                        } else {
+                            entries.append(entry)
+                        }
+                    }
+                    return entries.compactMap { $0 }
+                }
+            }
         }
 
         enum DropPlan {
@@ -570,20 +673,15 @@ struct ShelfDropTarget: NSViewRepresentable {
             }
 
             let dropID = UUID()
-            let receiverIDs = receivers.map { _ in UUID() }
-            promiseDrops[dropID] = PromiseDrop(
-                receivers: receivers,
-                destinationURL: destination,
-                pendingReceiverIDs: Set(receiverIDs)
-            )
+            var state = PromiseDropState(receiverCount: receivers.count)
             onPromiseDropStarted()
-            for (receiver, receiverID) in zip(receivers, receiverIDs) {
+            for (receiverIndex, receiver) in receivers.enumerated() {
                 let reader = Self.filePromiseReader { [weak self] fileURL, error in
                     self?.promisedFileDidArrive(
                         fileURL,
                         error: error,
                         for: dropID,
-                        receiverID: receiverID
+                        receiverIndex: receiverIndex
                     )
                 }
                 receiver.receivePromisedFiles(
@@ -592,7 +690,17 @@ struct ShelfDropTarget: NSViewRepresentable {
                     operationQueue: filePromiseQueue,
                     reader: reader
                 )
+                state.configureReceiver(
+                    at: receiverIndex,
+                    fileNames: receiver.fileNames,
+                    fileTypeCount: receiver.fileTypes.count
+                )
             }
+            promiseDrops[dropID] = PromiseDrop(
+                receivers: receivers,
+                destinationURL: destination,
+                state: state
+            )
             return true
         }
 
@@ -634,7 +742,7 @@ struct ShelfDropTarget: NSViewRepresentable {
             _ fileURL: URL,
             error: Error?,
             for dropID: UUID,
-            receiverID: UUID
+            receiverIndex: Int
         ) {
             let entry: FileEntry?
             if let error {
@@ -652,27 +760,28 @@ struct ShelfDropTarget: NSViewRepresentable {
             }
 
             guard var drop = promiseDrops[dropID] else {
+                Log.shelf.fault("Received a promised-file callback after its drop finished")
                 if let entry {
                     onDrop([entry])
                 }
                 return
             }
-            drop.pendingReceiverIDs.remove(receiverID)
-            if let entry {
-                drop.entries.append(entry)
+            if !drop.state.record(entry, fileURL: fileURL, for: receiverIndex) {
+                Log.shelf.fault("Received more promised files than the receiver advertised")
             }
 
-            if !drop.pendingReceiverIDs.isEmpty {
+            if !drop.state.isComplete {
                 promiseDrops[dropID] = drop
                 return
             }
 
             promiseDrops.removeValue(forKey: dropID)
-            if drop.entries.isEmpty {
+            let entries = drop.state.orderedEntries
+            if entries.isEmpty {
                 materializedFileStore.moveToTrash([drop.destinationURL])
                 ShelfFeedback.rejectedDrop()
             } else {
-                onDrop(drop.entries)
+                onDrop(entries)
             }
             onPromiseDropFinished()
         }

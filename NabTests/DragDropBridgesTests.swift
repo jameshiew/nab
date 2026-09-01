@@ -133,6 +133,86 @@ final class DragDropBridgesTests: XCTestCase {
         await fulfillment(of: [callback], timeout: 1)
     }
 
+    func testPromiseDropWaitsForEveryFileFromAReceiver() {
+        var state = ShelfDropTarget.DropView.PromiseDropState(receiverCount: 1)
+        state.configureReceiver(
+            at: 0,
+            fileNames: ["first.txt", "second.txt"],
+            fileTypeCount: 1
+        )
+
+        let firstURL = URL(fileURLWithPath: "/tmp/first.txt")
+        state.record(FileEntry(url: firstURL), fileURL: firstURL, for: 0)
+
+        XCTAssertFalse(state.isComplete)
+
+        let secondURL = URL(fileURLWithPath: "/tmp/second.txt")
+        state.record(FileEntry(url: secondURL), fileURL: secondURL, for: 0)
+
+        XCTAssertTrue(state.isComplete)
+    }
+
+    func testPromiseDropPreservesReceiverAndFileOrder() {
+        var state = ShelfDropTarget.DropView.PromiseDropState(receiverCount: 2)
+        state.configureReceiver(
+            at: 0,
+            fileNames: ["first.txt", "second.txt"],
+            fileTypeCount: 2
+        )
+        state.configureReceiver(
+            at: 1,
+            fileNames: ["third.txt"],
+            fileTypeCount: 1
+        )
+        let firstURL = URL(fileURLWithPath: "/tmp/first.txt")
+        let secondURL = URL(fileURLWithPath: "/tmp/second.txt")
+        let thirdURL = URL(fileURLWithPath: "/tmp/third.txt")
+
+        state.record(FileEntry(url: secondURL), fileURL: secondURL, for: 0)
+        state.record(FileEntry(url: thirdURL), fileURL: thirdURL, for: 1)
+        state.record(FileEntry(url: firstURL), fileURL: firstURL, for: 0)
+
+        XCTAssertTrue(state.isComplete)
+        XCTAssertEqual(
+            state.orderedEntries.map(\.url),
+            [firstURL, secondURL, thirdURL]
+        )
+    }
+
+    func testPromiseDropCountsErrorsBeforeCompleting() {
+        var state = ShelfDropTarget.DropView.PromiseDropState(receiverCount: 1)
+        state.configureReceiver(
+            at: 0,
+            fileNames: ["failed.txt", "kept.txt"],
+            fileTypeCount: 1
+        )
+        let failedURL = URL(fileURLWithPath: "/tmp/failed.txt")
+        let keptURL = URL(fileURLWithPath: "/tmp/kept.txt")
+
+        state.record(nil, fileURL: failedURL, for: 0)
+        XCTAssertFalse(state.isComplete)
+
+        state.record(FileEntry(url: keptURL), fileURL: keptURL, for: 0)
+
+        XCTAssertTrue(state.isComplete)
+        XCTAssertEqual(state.orderedEntries.map(\.url), [keptURL])
+    }
+
+    func testPromiseDropFallsBackToAdvertisedFileTypeCount() {
+        var state = ShelfDropTarget.DropView.PromiseDropState(receiverCount: 1)
+        state.configureReceiver(at: 0, fileNames: [], fileTypeCount: 2)
+        let firstURL = URL(fileURLWithPath: "/tmp/first.txt")
+        let secondURL = URL(fileURLWithPath: "/tmp/second.txt")
+
+        state.record(FileEntry(url: firstURL), fileURL: firstURL, for: 0)
+        XCTAssertFalse(state.isComplete)
+
+        state.record(FileEntry(url: secondURL), fileURL: secondURL, for: 0)
+
+        XCTAssertTrue(state.isComplete)
+        XCTAssertEqual(state.orderedEntries.map(\.url), [firstURL, secondURL])
+    }
+
     func testImageWriterWritesOffMainActorAndCompletesOnMainActor() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
