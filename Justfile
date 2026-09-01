@@ -13,6 +13,14 @@ build-debug:
 build-release:
     xcodebuild -project {{ project }} -scheme {{ scheme }} -configuration Release -derivedDataPath build build
 
+test:
+    xcodebuild -project {{ project }} -scheme {{ scheme }} -configuration Debug -derivedDataPath build test
+
+audit:
+    xcodebuild -project {{ project }} -scheme {{ scheme }} -configuration Debug -derivedDataPath build analyze
+
+verify: lint audit test build-debug
+
 run-release: build-release
     open {{ release_app_path }}
 
@@ -28,10 +36,10 @@ icon:
     xcrun swift Scripts/generate-app-icon.swift
 
 fmt:
-    xcrun swift-format format -i -r Nab/
+    xcrun swift-format format -i -r Nab/ NabTests/
 
 lint:
-    xcrun swift-format lint -r Nab/
+    xcrun swift-format lint -r Nab/ NabTests/
 
 clean:
     trash build

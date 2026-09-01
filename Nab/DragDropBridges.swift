@@ -335,7 +335,7 @@ final class FileDragSourceView: NSView, NSDraggingSource {
         endedAt screenPoint: NSPoint,
         operation: NSDragOperation
     ) {
-        if operation.contains(.move) {
+        if DragOperationPolicy.shouldRemoveItems(after: operation) {
             model?.remove(ids: draggedIDs)
         }
         draggedIDs = []
