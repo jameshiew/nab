@@ -25,12 +25,8 @@ run-release: build-release
     open {{ release_app_path }}
 
 install: build-release
-    #!/usr/bin/env bash
-    set -euo pipefail
-    app_path="$PWD/{{ release_app_path }}"
-    osascript \
-      -e 'set sourceApp to POSIX file "'"$app_path"'"' \
-      -e 'do shell script "/bin/rm -rf /Applications/{{ app_name }}.app && /usr/bin/ditto " & quoted form of POSIX path of sourceApp & " /Applications/{{ app_name }}.app" with administrator privileges'
+    mkdir -p "$HOME/Applications"
+    rsync --archive --delete --extended-attributes "{{ release_app_path }}/" "$HOME/Applications/Nab.app/"
 
 icon:
     xcrun swift Scripts/generate-app-icon.swift
