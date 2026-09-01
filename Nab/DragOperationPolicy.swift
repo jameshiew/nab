@@ -19,7 +19,7 @@ enum DragOperationPolicy {
         }
     }
 
-    nonisolated static func shouldRemoveItems(after operation: NSDragOperation) -> Bool {
+    nonisolated static func wasAccepted(_ operation: NSDragOperation) -> Bool {
         !operation.isEmpty
     }
 }

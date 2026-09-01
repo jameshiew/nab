@@ -5,6 +5,7 @@ import SwiftUI
 struct ShelfIcon: View {
     let item: ShelfItem
     let model: ShelfModel
+    let exportCoordinator: FilePromiseExportCoordinator
     let onDragEnded: () -> Void
     @State private var hovering = false
     @State private var thumbnail: NSImage?
@@ -24,6 +25,7 @@ struct ShelfIcon: View {
             FileDragSource(
                 itemID: item.id,
                 model: model,
+                exportCoordinator: exportCoordinator,
                 dragImage: thumbnail,
                 onDragEnded: onDragEnded,
                 onForceClick: item.isStack ? {} : quickLook

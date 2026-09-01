@@ -64,6 +64,7 @@ struct WindowDragHandle: NSViewRepresentable {
 struct FileDragSource<Content: View>: NSViewRepresentable {
     let itemID: ShelfItem.ID
     let model: ShelfModel
+    let exportCoordinator: FilePromiseExportCoordinator
     let dragImage: NSImage?
     let onDragEnded: () -> Void
     let onForceClick: () -> Void
@@ -75,6 +76,7 @@ struct FileDragSource<Content: View>: NSViewRepresentable {
         let view = FileDragSourceView()
         view.itemID = itemID
         view.model = model
+        view.exportCoordinator = exportCoordinator
         view.dragImage = dragImage
         view.onDragEnded = onDragEnded
         view.onForceClick = onForceClick
@@ -92,6 +94,7 @@ struct FileDragSource<Content: View>: NSViewRepresentable {
     func updateNSView(_ nsView: FileDragSourceView, context: Context) {
         nsView.itemID = itemID
         nsView.model = model
+        nsView.exportCoordinator = exportCoordinator
         nsView.dragImage = dragImage
         nsView.onDragEnded = onDragEnded
         nsView.onForceClick = onForceClick
@@ -110,6 +113,7 @@ struct FileDragSource<Content: View>: NSViewRepresentable {
 final class FileDragSourceView: NSView, NSDraggingSource {
     var itemID: ShelfItem.ID?
     weak var model: ShelfModel?
+    var exportCoordinator: FilePromiseExportCoordinator?
     var dragImage: NSImage?
     var onDragEnded: () -> Void = {}
     var onForceClick: () -> Void = {}
@@ -119,8 +123,7 @@ final class FileDragSourceView: NSView, NSDraggingSource {
     private var pendingClickAction: (() -> Void)?
     private var cursorInsideShelf = true
     private var didForceClick = false
-    private var draggedIDs: [ShelfItem.ID] = []
-    private var filePromiseDelegates: [MaterializedFilePromiseDelegate] = []
+    private var activeExportID: FilePromiseExportCoordinator.ExportID?
     private var dragContainsMaterializedFiles = false
     private static let dragThreshold: CGFloat = 3
 
@@ -237,8 +240,8 @@ final class FileDragSourceView: NSView, NSDraggingSource {
         let selected = model.selectedItemsInOrder()
 
         var dragItems: [NSDraggingItem] = []
-        var successfulIDs: [ShelfItem.ID] = []
-        filePromiseDelegates = []
+        guard let exportCoordinator else { return }
+        let exportID = exportCoordinator.beginExport()
         dragContainsMaterializedFiles = false
         let dragSize: CGFloat = 48
         let clickLocation = convert(event.locationInWindow, from: nil)
@@ -253,6 +256,7 @@ final class FileDragSourceView: NSView, NSDraggingSource {
             guard let resolvedItem = model.items.first(where: { $0.id == shelfItem.id }) else {
                 continue
             }
+            exportCoordinator.registerItem(shelfItem.id, in: exportID)
             let isClickedItem = shelfItem.id == itemID
             for (entryIdx, entry) in resolvedItem.entries.enumerated() {
                 let url = entry.url
@@ -268,8 +272,11 @@ final class FileDragSourceView: NSView, NSDraggingSource {
                 }()
                 let pasteboardWriter: NSPasteboardWriting
                 if entry.isMaterializedByNab {
-                    let delegate = MaterializedFilePromiseDelegate(sourceURL: url)
-                    filePromiseDelegates.append(delegate)
+                    let delegate = exportCoordinator.makePromiseDelegate(
+                        sourceURL: url,
+                        itemID: shelfItem.id,
+                        in: exportID
+                    )
                     dragContainsMaterializedFiles = true
                     let fileType =
                         UTType(filenameExtension: url.pathExtension)?.identifier
@@ -295,16 +302,16 @@ final class FileDragSourceView: NSView, NSDraggingSource {
                 dragItems.append(draggingItem)
                 stackIndex += 1
             }
-            successfulIDs.append(shelfItem.id)
         }
 
         guard !dragItems.isEmpty else {
+            exportCoordinator.cancelExport(exportID)
             ShelfFeedback.rejectedDrop()
             onDragEnded()
             return
         }
 
-        draggedIDs = successfulIDs
+        activeExportID = exportID
         cursorInsideShelf = true
         beginDraggingSession(with: dragItems, event: event, source: self)
     }
@@ -361,41 +368,12 @@ final class FileDragSourceView: NSView, NSDraggingSource {
         endedAt screenPoint: NSPoint,
         operation: NSDragOperation
     ) {
-        if DragOperationPolicy.shouldRemoveItems(after: operation) {
-            model?.remove(ids: draggedIDs)
+        if let activeExportID {
+            exportCoordinator?.finishExport(activeExportID, operation: operation)
         }
-        draggedIDs = []
-        filePromiseDelegates = []
+        activeExportID = nil
         dragContainsMaterializedFiles = false
         onDragEnded()
-    }
-}
-
-final class MaterializedFilePromiseDelegate: NSObject, NSFilePromiseProviderDelegate {
-    let sourceURL: URL
-
-    init(sourceURL: URL) {
-        self.sourceURL = sourceURL
-    }
-
-    func filePromiseProvider(
-        _ filePromiseProvider: NSFilePromiseProvider,
-        fileNameForType fileType: String
-    ) -> String {
-        sourceURL.lastPathComponent
-    }
-
-    nonisolated func filePromiseProvider(
-        _ filePromiseProvider: NSFilePromiseProvider,
-        writePromiseTo url: URL,
-        completionHandler: @escaping (Error?) -> Void
-    ) {
-        do {
-            try FileManager.default.copyItem(at: sourceURL, to: url)
-            completionHandler(nil)
-        } catch {
-            completionHandler(error)
-        }
     }
 }
 

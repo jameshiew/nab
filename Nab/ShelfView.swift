@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ShelfView: View {
     @Bindable var model: ShelfModel
+    let exportCoordinator: FilePromiseExportCoordinator
     var onDropReceived: () -> Void = {}
     var onItemDragEnded: () -> Void = {}
     var onHeaderDragEnded: () -> Void = {}
@@ -82,6 +83,7 @@ struct ShelfView: View {
                     ShelfIcon(
                         item: item,
                         model: model,
+                        exportCoordinator: exportCoordinator,
                         onDragEnded: onItemDragEnded
                     )
                 }
