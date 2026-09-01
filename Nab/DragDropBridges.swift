@@ -506,22 +506,32 @@ struct ShelfDropTarget: NSViewRepresentable {
             )
             onPromiseDropStarted()
             for (receiver, receiverID) in zip(receivers, receiverIDs) {
+                let reader = Self.filePromiseReader { [weak self] fileURL, error in
+                    self?.promisedFileDidArrive(
+                        fileURL,
+                        error: error,
+                        for: dropID,
+                        receiverID: receiverID
+                    )
+                }
                 receiver.receivePromisedFiles(
                     atDestination: destination,
                     options: [:],
-                    operationQueue: filePromiseQueue
-                ) { [weak self] fileURL, error in
-                    Task { @MainActor [weak self] in
-                        self?.promisedFileDidArrive(
-                            fileURL,
-                            error: error,
-                            for: dropID,
-                            receiverID: receiverID
-                        )
-                    }
-                }
+                    operationQueue: filePromiseQueue,
+                    reader: reader
+                )
             }
             return true
+        }
+
+        static nonisolated func filePromiseReader(
+            _ action: @escaping @MainActor @Sendable (URL, Error?) -> Void
+        ) -> @Sendable (URL, Error?) -> Void {
+            { fileURL, error in
+                Task { @MainActor in
+                    action(fileURL, error)
+                }
+            }
         }
 
         private func promisedFileDidArrive(
