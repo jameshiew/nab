@@ -159,14 +159,19 @@ final class ShelfPanel: NSPanel {
         }
     }
 
-    private func animate(to frame: NSRect, completionHandler: (() -> Void)? = nil) {
+    private func animate(
+        to frame: NSRect,
+        completionHandler: (@MainActor @Sendable () -> Void)? = nil
+    ) {
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.22
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             ctx.allowsImplicitAnimation = true
             self.animator().setFrame(frame, display: true)
         } completionHandler: {
-            completionHandler?()
+            Task { @MainActor in
+                completionHandler?()
+            }
         }
     }
 
