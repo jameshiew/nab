@@ -411,6 +411,12 @@ struct ShelfDropTarget: NSViewRepresentable {
             var entries: [FileEntry] = []
         }
 
+        enum DropPlan {
+            case filePromise(NSFilePromiseReceiver)
+            case fileURL(URL)
+            case image(PendingImage)
+        }
+
         struct PendingImage: Sendable {
             let data: Data
             let destinationURL: URL
@@ -456,45 +462,77 @@ struct ShelfDropTarget: NSViewRepresentable {
 
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-        override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
-
-        override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
-
-        override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { true }
-
-        override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-            let pasteboard = sender.draggingPasteboard
-
-            if receiveFilePromises(from: pasteboard) {
-                return true
-            }
-
-            var entries: [FileEntry] = []
-
-            entries.append(contentsOf: Self.fileURLs(from: pasteboard).map { FileEntry(url: $0) })
-
-            if !entries.isEmpty {
-                onDrop(entries)
-                return true
-            }
-
-            return receiveImages(from: pasteboard)
+        override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+            Self.dragOperation(forSource: sender.draggingSource)
         }
 
-        private func receiveImages(from pasteboard: NSPasteboard) -> Bool {
+        override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+            Self.dragOperation(forSource: sender.draggingSource)
+        }
+
+        override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            !Self.dragOperation(forSource: sender.draggingSource).isEmpty
+        }
+
+        override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            guard !Self.dragOperation(forSource: sender.draggingSource).isEmpty else {
+                ShelfFeedback.rejectedDrop()
+                return false
+            }
+
+            let pasteboard = sender.draggingPasteboard
+            let plans = makeDropPlans(from: pasteboard)
+            guard !plans.isEmpty else { return false }
+
+            var receivers: [NSFilePromiseReceiver] = []
+            var entries: [FileEntry] = []
             var images: [PendingImage] = []
-            for item in pasteboard.pasteboardItems ?? [] {
+            for plan in plans {
+                switch plan {
+                case .filePromise(let receiver):
+                    receivers.append(receiver)
+                case .fileURL(let url):
+                    entries.append(FileEntry(url: url))
+                case .image(let image):
+                    images.append(image)
+                }
+            }
+
+            var accepted = receiveFilePromises(receivers)
+            if !entries.isEmpty {
+                onDrop(entries)
+                accepted = true
+            }
+            accepted = receiveImages(images) || accepted
+            return accepted
+        }
+
+        static func dragOperation(forSource source: Any?) -> NSDragOperation {
+            source is FileDragSourceView ? [] : .copy
+        }
+
+        func makeDropPlans(from pasteboard: NSPasteboard) -> [DropPlan] {
+            (pasteboard.pasteboardItems ?? []).compactMap { item in
+                if let receiver = Self.filePromiseReceiver(from: item) {
+                    return .filePromise(receiver)
+                }
+                if let url = Self.fileURL(from: item) {
+                    return .fileURL(url)
+                }
                 for (type, ext) in Self.imageTypes where item.types.contains(type) {
                     guard let data = item.data(forType: type) else { continue }
-                    images.append(
+                    return .image(
                         PendingImage(
                             data: data,
                             destinationURL: droppedImageURL(pathExtension: ext)
                         )
                     )
-                    break
                 }
+                return nil
             }
+        }
+
+        private func receiveImages(_ images: [PendingImage]) -> Bool {
             guard !images.isEmpty else { return false }
 
             onPromiseDropStarted()
@@ -518,12 +556,7 @@ struct ShelfDropTarget: NSViewRepresentable {
             return true
         }
 
-        private func receiveFilePromises(from pasteboard: NSPasteboard) -> Bool {
-            let receivers =
-                pasteboard.readObjects(
-                    forClasses: [NSFilePromiseReceiver.self],
-                    options: nil
-                ) as? [NSFilePromiseReceiver] ?? []
+        private func receiveFilePromises(_ receivers: [NSFilePromiseReceiver]) -> Bool {
             guard !receivers.isEmpty else { return false }
 
             let destination: URL
@@ -650,20 +683,29 @@ struct ShelfDropTarget: NSViewRepresentable {
             return materializedFileStore.droppedImageURL(filename: filename)
         }
 
-        private static func fileURLs(from pasteboard: NSPasteboard) -> [URL] {
-            let fileOptions: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
-            let objects = pasteboard.readObjects(forClasses: [NSURL.self], options: fileOptions) ?? []
-            return objects.compactMap { object in
-                if let url = object as? URL {
-                    return url
+        private static func filePromiseReceiver(from item: NSPasteboardItem)
+            -> NSFilePromiseReceiver?
+        {
+            for rawType in NSFilePromiseReceiver.readableDraggedTypes {
+                let type = NSPasteboard.PasteboardType(rawType)
+                guard let propertyList = item.propertyList(forType: type) else { continue }
+                if let receiver = NSFilePromiseReceiver(
+                    pasteboardPropertyList: propertyList,
+                    ofType: type
+                ) {
+                    return receiver
                 }
-                if let url = object as? NSURL {
-                    return url as URL
-                }
-                return nil
             }
-            .filter { FileManager.default.fileExists(atPath: $0.path) }
+            return nil
         }
 
+        private static func fileURL(from item: NSPasteboardItem) -> URL? {
+            guard let value = item.string(forType: .fileURL),
+                let url = URL(string: value),
+                url.isFileURL,
+                FileManager.default.fileExists(atPath: url.path)
+            else { return nil }
+            return url
+        }
     }
 }

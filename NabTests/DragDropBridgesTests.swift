@@ -5,6 +5,23 @@ import XCTest
 
 @MainActor
 final class DragDropBridgesTests: XCTestCase {
+    private final class PromiseDelegate: NSObject, NSFilePromiseProviderDelegate {
+        func filePromiseProvider(
+            _ filePromiseProvider: NSFilePromiseProvider,
+            fileNameForType fileType: String
+        ) -> String {
+            "promised.txt"
+        }
+
+        func filePromiseProvider(
+            _ filePromiseProvider: NSFilePromiseProvider,
+            writePromiseTo url: URL,
+            completionHandler: @escaping (Error?) -> Void
+        ) {
+            completionHandler(nil)
+        }
+    }
+
     func testMaterializedImageDragPublishesAFileURL() {
         let entry = FileEntry(
             url: URL(fileURLWithPath: "/tmp/materialized.png"),
@@ -27,6 +44,75 @@ final class DragDropBridgesTests: XCTestCase {
 
         XCTAssertTrue(Set(promiseTypes).isSubset(of: Set(view.registeredDraggedTypes)))
         XCTAssertTrue(view.registeredDraggedTypes.contains(.fileURL))
+    }
+
+    func testShelfOriginatingDragIsRejected() {
+        XCTAssertTrue(
+            ShelfDropTarget.DropView.dragOperation(forSource: FileDragSourceView()).isEmpty
+        )
+        XCTAssertEqual(
+            ShelfDropTarget.DropView.dragOperation(forSource: NSObject()),
+            .copy
+        )
+    }
+
+    func testMixedPasteboardPlansEachItemIndependently() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fileURL = directory.appendingPathComponent("direct.txt")
+        try Data("direct".utf8).write(to: fileURL)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let promiseDelegate = PromiseDelegate()
+        let promise = NSFilePromiseProvider(fileType: "public.plain-text", delegate: promiseDelegate)
+        let image = NSPasteboardItem()
+        image.setData(Data("image".utf8), forType: .png)
+        let pasteboard = NSPasteboard(name: .init("dev.nab.tests.\(UUID().uuidString)"))
+        pasteboard.clearContents()
+        let writers: [NSPasteboardWriting] = [promise, fileURL as NSURL, image]
+        pasteboard.writeObjects(writers)
+
+        let plans = ShelfDropTarget.DropView().makeDropPlans(from: pasteboard)
+
+        XCTAssertEqual(plans.count, 3)
+        guard case .filePromise = plans[0] else {
+            return XCTFail("Expected the promised-file item to use its promise")
+        }
+        guard case .fileURL(let plannedURL) = plans[1] else {
+            return XCTFail("Expected the direct-file item to use its URL")
+        }
+        XCTAssertEqual(plannedURL, fileURL)
+        guard case .image(let pendingImage) = plans[2] else {
+            return XCTFail("Expected the image item to use its image data")
+        }
+        XCTAssertEqual(pendingImage.data, Data("image".utf8))
+        withExtendedLifetime(promiseDelegate) {}
+    }
+
+    func testFileURLWinsOverImageDataForTheSameItem() throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try Data("file".utf8).write(to: fileURL)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+        let item = NSPasteboardItem()
+        item.setString(fileURL.absoluteString, forType: .fileURL)
+        item.setData(Data("image".utf8), forType: .png)
+        let pasteboard = NSPasteboard(name: .init("dev.nab.tests.\(UUID().uuidString)"))
+        pasteboard.clearContents()
+        pasteboard.writeObjects([item])
+
+        let plans = ShelfDropTarget.DropView().makeDropPlans(from: pasteboard)
+
+        XCTAssertEqual(plans.count, 1)
+        guard case .fileURL(let plannedURL) = plans[0] else {
+            return XCTFail("Expected one representation for the pasteboard item")
+        }
+        XCTAssertEqual(plannedURL, fileURL)
     }
 
     func testFilePromiseReaderHopsFromOperationQueueToMainActor() async {
