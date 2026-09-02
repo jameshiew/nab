@@ -1,6 +1,30 @@
 import AppKit
 import SwiftUI
 
+struct ShelfDropResultHandler {
+    typealias AddResult = (added: Int, duplicates: Int)
+
+    let addEntries: ([FileEntry]) -> AddResult
+    let rejectDrop: () -> Void
+    let onDropReceived: () -> Void
+    let onDropPartiallyFailed: (InboundDropResult) -> Void
+
+    func handle(_ result: InboundDropResult) {
+        if result.successfulEntries.isEmpty {
+            rejectDrop()
+        } else {
+            let addResult = addEntries(result.successfulEntries)
+            if addResult.added == 0 && addResult.duplicates > 0 {
+                rejectDrop()
+            }
+            onDropReceived()
+        }
+        if result.partialFailureMessage != nil {
+            onDropPartiallyFailed(result)
+        }
+    }
+}
+
 struct ShelfView: View {
     @Bindable var model: ShelfModel
     let exportCoordinator: FileExportCoordinator
@@ -35,18 +59,12 @@ struct ShelfView: View {
     }
 
     private func handleDrop(_ result: InboundDropResult) {
-        if result.successfulEntries.isEmpty {
-            ShelfFeedback.rejectedDrop()
-        } else {
-            let addResult = model.add(result.successfulEntries)
-            if addResult.added == 0 && addResult.duplicates > 0 {
-                ShelfFeedback.rejectedDrop()
-            }
-            onDropReceived()
-        }
-        if result.partialFailureMessage != nil {
-            onDropPartiallyFailed(result)
-        }
+        ShelfDropResultHandler(
+            addEntries: { model.add($0) },
+            rejectDrop: ShelfFeedback.rejectedDrop,
+            onDropReceived: onDropReceived,
+            onDropPartiallyFailed: onDropPartiallyFailed
+        ).handle(result)
     }
 
     private var header: some View {

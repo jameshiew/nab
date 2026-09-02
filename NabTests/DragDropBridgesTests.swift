@@ -56,6 +56,60 @@ final class DragDropBridgesTests: XCTestCase {
         )
     }
 
+    func testPasteboardInterpreterKeepsDirectURLAndFilePromise() throws {
+        let fileURL = try makeTemporaryFile(named: "direct.txt")
+        let promiseDelegate = PromiseDelegate()
+        let promise = NSFilePromiseProvider(
+            fileType: "public.plain-text",
+            delegate: promiseDelegate
+        )
+        let pasteboard = makePasteboard(with: [fileURL as NSURL, promise])
+
+        let plans = makeInterpreter().plans(from: pasteboard)
+
+        XCTAssertEqual(plans.count, 2)
+        guard case .fileURL(let plannedURL) = plans[0] else {
+            return XCTFail("Expected the direct file URL first")
+        }
+        XCTAssertEqual(plannedURL, fileURL)
+        guard case .filePromise = plans[1] else {
+            return XCTFail("Expected the file promise second")
+        }
+        withExtendedLifetime(promiseDelegate) {}
+    }
+
+    func testPasteboardInterpreterKeepsDirectURLAndRawImage() throws {
+        let fileURL = try makeTemporaryFile(named: "direct.txt")
+        let imageData = Data("image".utf8)
+        let image = NSPasteboardItem()
+        image.setData(imageData, forType: .png)
+        let pasteboard = makePasteboard(with: [fileURL as NSURL, image])
+
+        let plans = makeInterpreter().plans(from: pasteboard)
+
+        XCTAssertEqual(plans.count, 2)
+        guard case .fileURL(let plannedURL) = plans[0] else {
+            return XCTFail("Expected the direct file URL first")
+        }
+        XCTAssertEqual(plannedURL, fileURL)
+        guard case .image(let pendingImage) = plans[1] else {
+            return XCTFail("Expected the raw image second")
+        }
+        XCTAssertEqual(pendingImage.data, imageData)
+    }
+
+    func testShelfOriginatingMixedDragIsRejected() throws {
+        let fileURL = try makeTemporaryFile(named: "direct.txt")
+        let image = NSPasteboardItem()
+        image.setData(Data("image".utf8), forType: .png)
+        let pasteboard = makePasteboard(with: [fileURL as NSURL, image])
+
+        XCTAssertEqual(makeInterpreter().plans(from: pasteboard).count, 2)
+        XCTAssertTrue(
+            ShelfDropTarget.DropView.dragOperation(forSource: FileDragSourceView()).isEmpty
+        )
+    }
+
     func testMixedPasteboardPlansEachItemIndependently() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -75,7 +129,7 @@ final class DragDropBridgesTests: XCTestCase {
         let writers: [NSPasteboardWriting] = [promise, fileURL as NSURL, image]
         pasteboard.writeObjects(writers)
 
-        let plans = ShelfDropTarget.DropView().makeDropPlans(from: pasteboard)
+        let plans = makeInterpreter().plans(from: pasteboard)
 
         XCTAssertEqual(plans.count, 3)
         guard case .filePromise = plans[0] else {
@@ -106,13 +160,31 @@ final class DragDropBridgesTests: XCTestCase {
         pasteboard.clearContents()
         pasteboard.writeObjects([item])
 
-        let plans = ShelfDropTarget.DropView().makeDropPlans(from: pasteboard)
+        let plans = makeInterpreter().plans(from: pasteboard)
 
         XCTAssertEqual(plans.count, 1)
         guard case .fileURL(let plannedURL) = plans[0] else {
             return XCTFail("Expected one representation for the pasteboard item")
         }
         XCTAssertEqual(plannedURL, fileURL)
+    }
+
+    func testMissingFileURLFallsBackToImageDataForTheSameItem() {
+        let item = NSPasteboardItem()
+        let missingURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let imageData = Data("image".utf8)
+        item.setString(missingURL.absoluteString, forType: .fileURL)
+        item.setData(imageData, forType: .png)
+        let pasteboard = makePasteboard(with: [item])
+
+        let plans = makeInterpreter().plans(from: pasteboard)
+
+        XCTAssertEqual(plans.count, 1)
+        guard case .image(let pendingImage) = plans[0] else {
+            return XCTFail("Expected image data after rejecting the missing file URL")
+        }
+        XCTAssertEqual(pendingImage.data, imageData)
     }
 
     func testFilePromiseReaderHopsFromOperationQueueToMainActor() async {
@@ -133,8 +205,8 @@ final class DragDropBridgesTests: XCTestCase {
         await fulfillment(of: [callback], timeout: 1)
     }
 
-    func testPromiseDropWaitsForEveryFileFromAReceiver() {
-        var state = ShelfDropTarget.DropView.PromiseDropState(receiverCount: 1)
+    func testPromiseAccumulatorWaitsForTwoSuccessfulCallbacksFromOneReceiver() {
+        var state = PromiseDropAccumulator(receiverCount: 1)
         state.configureReceiver(
             at: 0,
             fileNames: ["first.txt", "second.txt"],
@@ -152,8 +224,8 @@ final class DragDropBridgesTests: XCTestCase {
         XCTAssertTrue(state.isComplete)
     }
 
-    func testPromiseDropPreservesReceiverAndFileOrder() {
-        var state = ShelfDropTarget.DropView.PromiseDropState(receiverCount: 2)
+    func testPromiseAccumulatorPreservesSourceOrderWhenCallbacksCompleteOutOfOrder() {
+        var state = PromiseDropAccumulator(receiverCount: 2)
         state.configureReceiver(
             at: 0,
             fileNames: ["first.txt", "second.txt"],
@@ -179,8 +251,8 @@ final class DragDropBridgesTests: XCTestCase {
         )
     }
 
-    func testPromiseDropCountsErrorsBeforeCompleting() {
-        var state = ShelfDropTarget.DropView.PromiseDropState(receiverCount: 1)
+    func testPromiseAccumulatorWaitsForSuccessAfterErrorCallback() {
+        var state = PromiseDropAccumulator(receiverCount: 1)
         state.configureReceiver(
             at: 0,
             fileNames: ["failed.txt", "kept.txt"],
@@ -200,8 +272,76 @@ final class DragDropBridgesTests: XCTestCase {
         XCTAssertEqual(state.result.failures, [failure])
     }
 
-    func testPromiseDropFallsBackToAdvertisedFileTypeCount() {
-        var state = ShelfDropTarget.DropView.PromiseDropState(receiverCount: 1)
+    func testPartiallyFailedPromiseDropRequestsVisibleFeedback() {
+        var state = PromiseDropAccumulator(receiverCount: 1)
+        state.configureReceiver(
+            at: 0,
+            fileNames: ["failed.txt", "kept.txt"],
+            fileTypeCount: 2
+        )
+        let failure = InboundDropFailure(errorDescription: "The first file failed.")
+        let failedURL = URL(fileURLWithPath: "/tmp/failed.txt")
+        let keptURL = URL(fileURLWithPath: "/tmp/kept.txt")
+        state.recordFailure(failure, fileURL: failedURL, for: 0)
+        state.record(FileEntry(url: keptURL), fileURL: keptURL, for: 0)
+        var addedEntries: [FileEntry] = []
+        var rejected = false
+        var dropReceived = false
+        var reportedResult: InboundDropResult?
+        let handler = ShelfDropResultHandler(
+            addEntries: {
+                addedEntries = $0
+                return (added: $0.count, duplicates: 0)
+            },
+            rejectDrop: { rejected = true },
+            onDropReceived: { dropReceived = true },
+            onDropPartiallyFailed: { reportedResult = $0 }
+        )
+
+        handler.handle(state.result)
+
+        XCTAssertEqual(addedEntries.map(\.url), [keptURL])
+        XCTAssertFalse(rejected)
+        XCTAssertTrue(dropReceived)
+        XCTAssertEqual(reportedResult, state.result)
+    }
+
+    func testTotallyFailedPromiseDropRequestsRejectionFeedback() {
+        var state = PromiseDropAccumulator(receiverCount: 1)
+        state.configureReceiver(
+            at: 0,
+            fileNames: ["failed.txt"],
+            fileTypeCount: 1
+        )
+        state.recordFailure(
+            InboundDropFailure(errorDescription: "The file failed."),
+            fileURL: URL(fileURLWithPath: "/tmp/failed.txt"),
+            for: 0
+        )
+        var addedEntries: [FileEntry] = []
+        var rejected = false
+        var dropReceived = false
+        var partialFailureReported = false
+        let handler = ShelfDropResultHandler(
+            addEntries: {
+                addedEntries = $0
+                return (added: $0.count, duplicates: 0)
+            },
+            rejectDrop: { rejected = true },
+            onDropReceived: { dropReceived = true },
+            onDropPartiallyFailed: { _ in partialFailureReported = true }
+        )
+
+        handler.handle(state.result)
+
+        XCTAssertTrue(addedEntries.isEmpty)
+        XCTAssertTrue(rejected)
+        XCTAssertFalse(dropReceived)
+        XCTAssertFalse(partialFailureReported)
+    }
+
+    func testPromiseAccumulatorFallsBackToAdvertisedFileTypeCount() {
+        var state = PromiseDropAccumulator(receiverCount: 1)
         state.configureReceiver(at: 0, fileNames: [], fileTypeCount: 2)
         let firstURL = URL(fileURLWithPath: "/tmp/first.txt")
         let secondURL = URL(fileURLWithPath: "/tmp/second.txt")
@@ -218,7 +358,8 @@ final class DragDropBridgesTests: XCTestCase {
     func testImageWriterReportsSuccessesAndFailuresOnMainActor() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let destinationURL = directory.appendingPathComponent("dropped.png")
+        let firstDestinationURL = directory.appendingPathComponent("first.png")
+        let secondDestinationURL = directory.appendingPathComponent("second.png")
         let blockingParentURL = directory.appendingPathComponent("not-a-directory")
         let failedDestinationURL = blockingParentURL.appendingPathComponent("failed.png")
         let contents = Data("image data".utf8)
@@ -230,7 +371,7 @@ final class DragDropBridgesTests: XCTestCase {
         let callback = expectation(description: "image-write callback")
         let writer = ShelfDropTarget.DropView.imageWriter { result in
             XCTAssertTrue(Thread.isMainThread)
-            XCTAssertEqual(result.successfulURLs, [destinationURL])
+            XCTAssertEqual(result.successfulURLs, [firstDestinationURL, secondDestinationURL])
             XCTAssertEqual(result.failures.count, 1)
             XCTAssertFalse(result.failures[0].errorDescription.isEmpty)
             callback.fulfill()
@@ -240,13 +381,15 @@ final class DragDropBridgesTests: XCTestCase {
         queue.addOperation {
             XCTAssertFalse(Thread.isMainThread)
             writer([
-                .init(data: contents, destinationURL: destinationURL),
+                .init(data: contents, destinationURL: firstDestinationURL),
                 .init(data: contents, destinationURL: failedDestinationURL),
+                .init(data: contents, destinationURL: secondDestinationURL),
             ])
         }
 
         await fulfillment(of: [callback], timeout: 1)
-        XCTAssertEqual(try Data(contentsOf: destinationURL), contents)
+        XCTAssertEqual(try Data(contentsOf: firstDestinationURL), contents)
+        XCTAssertEqual(try Data(contentsOf: secondDestinationURL), contents)
     }
 
     func testPartialDropResultBuildsConciseFailureMessage() {
@@ -265,5 +408,30 @@ final class DragDropBridgesTests: XCTestCase {
             InboundDropResult(successfulEntries: [], failures: result.failures)
                 .partialFailureMessage
         )
+    }
+
+    private func makeInterpreter() -> DropPasteboardInterpreter {
+        DropPasteboardInterpreter { pathExtension in
+            URL(fileURLWithPath: "/tmp/dropped.\(pathExtension)")
+        }
+    }
+
+    private func makePasteboard(with writers: [NSPasteboardWriting]) -> NSPasteboard {
+        let pasteboard = NSPasteboard(name: .init("dev.nab.tests.\(UUID().uuidString)"))
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.writeObjects(writers))
+        return pasteboard
+    }
+
+    private func makeTemporaryFile(named name: String) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fileURL = directory.appendingPathComponent(name)
+        try Data("file".utf8).write(to: fileURL)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        return fileURL
     }
 }

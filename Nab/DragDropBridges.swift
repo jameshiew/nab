@@ -398,6 +398,216 @@ struct InboundDropResult: Equatable {
     }
 }
 
+struct DropPasteboardInterpreter {
+    enum Plan {
+        case filePromise(NSFilePromiseReceiver)
+        case fileURL(URL)
+        case image(PendingImage)
+    }
+
+    struct PendingImage: Sendable {
+        let data: Data
+        let destinationURL: URL
+    }
+
+    static let supportedImageTypes: [(NSPasteboard.PasteboardType, String)] = [
+        (NSPasteboard.PasteboardType(UTType.png.identifier), "png"),
+        (NSPasteboard.PasteboardType(UTType.jpeg.identifier), "jpg"),
+        (NSPasteboard.PasteboardType(UTType.heic.identifier), "heic"),
+        (NSPasteboard.PasteboardType(UTType.tiff.identifier), "tiff"),
+        (NSPasteboard.PasteboardType(UTType.gif.identifier), "gif"),
+    ]
+
+    let imageDestinationURL: (String) -> URL
+
+    func plans(from pasteboard: NSPasteboard) -> [Plan] {
+        (pasteboard.pasteboardItems ?? []).compactMap { item in
+            if let receiver = Self.filePromiseReceiver(from: item) {
+                return .filePromise(receiver)
+            }
+            if let url = Self.fileURL(from: item) {
+                return .fileURL(url)
+            }
+            for (type, ext) in Self.supportedImageTypes where item.types.contains(type) {
+                guard let data = item.data(forType: type) else { continue }
+                return .image(
+                    PendingImage(
+                        data: data,
+                        destinationURL: imageDestinationURL(ext)
+                    )
+                )
+            }
+            return nil
+        }
+    }
+
+    private static func filePromiseReceiver(from item: NSPasteboardItem)
+        -> NSFilePromiseReceiver?
+    {
+        for rawType in NSFilePromiseReceiver.readableDraggedTypes {
+            let type = NSPasteboard.PasteboardType(rawType)
+            guard let propertyList = item.propertyList(forType: type) else { continue }
+            if let receiver = NSFilePromiseReceiver(
+                pasteboardPropertyList: propertyList,
+                ofType: type
+            ) {
+                return receiver
+            }
+        }
+        return nil
+    }
+
+    private static func fileURL(from item: NSPasteboardItem) -> URL? {
+        guard let value = item.string(forType: .fileURL),
+            let url = URL(string: value),
+            url.isFileURL,
+            FileManager.default.fileExists(atPath: url.path)
+        else { return nil }
+        return url
+    }
+}
+
+struct PromiseDropAccumulator {
+    private struct ReceivedFile {
+        let fileIndex: Int?
+        let entry: FileEntry?
+        let failure: InboundDropFailure?
+    }
+
+    private struct ReceiverState {
+        var fileNames: [String] = []
+        var expectedFileCount = 1
+        var receivedFiles: [ReceivedFile] = []
+        var claimedFileIndices: Set<Int> = []
+
+        var isComplete: Bool {
+            receivedFiles.count >= expectedFileCount
+        }
+    }
+
+    private var receivers: [ReceiverState]
+
+    init(receiverCount: Int) {
+        receivers = (0..<receiverCount).map { _ in ReceiverState() }
+    }
+
+    mutating func configureReceiver(
+        at receiverIndex: Int,
+        fileNames: [String],
+        fileTypeCount: Int
+    ) {
+        precondition(receivers.indices.contains(receiverIndex))
+        precondition(receivers[receiverIndex].receivedFiles.isEmpty)
+        receivers[receiverIndex].fileNames = fileNames
+        receivers[receiverIndex].expectedFileCount = max(
+            fileNames.count,
+            fileTypeCount,
+            1
+        )
+    }
+
+    @discardableResult
+    mutating func record(
+        _ entry: FileEntry,
+        fileURL: URL,
+        for receiverIndex: Int
+    ) -> Bool {
+        record(
+            entry: entry,
+            failure: nil,
+            fileURL: fileURL,
+            for: receiverIndex
+        )
+    }
+
+    @discardableResult
+    mutating func recordFailure(
+        _ failure: InboundDropFailure,
+        fileURL: URL,
+        for receiverIndex: Int
+    ) -> Bool {
+        record(
+            entry: nil,
+            failure: failure,
+            fileURL: fileURL,
+            for: receiverIndex
+        )
+    }
+
+    private mutating func record(
+        entry: FileEntry?,
+        failure: InboundDropFailure?,
+        fileURL: URL,
+        for receiverIndex: Int
+    ) -> Bool {
+        precondition(receivers.indices.contains(receiverIndex))
+        precondition((entry == nil) != (failure == nil))
+        var receiver = receivers[receiverIndex]
+        let wasExpected = receiver.receivedFiles.count < receiver.expectedFileCount
+        if !wasExpected {
+            receiver.expectedFileCount += 1
+        }
+
+        let fileIndex: Int?
+        if entry != nil,
+            let index = receiver.fileNames.indices.first(where: {
+                !receiver.claimedFileIndices.contains($0)
+                    && receiver.fileNames[$0] == fileURL.lastPathComponent
+            })
+        {
+            receiver.claimedFileIndices.insert(index)
+            fileIndex = index
+        } else {
+            fileIndex = nil
+        }
+        receiver.receivedFiles.append(
+            ReceivedFile(fileIndex: fileIndex, entry: entry, failure: failure)
+        )
+        receivers[receiverIndex] = receiver
+        return wasExpected
+    }
+
+    var isComplete: Bool {
+        receivers.allSatisfy(\.isComplete)
+    }
+
+    var result: InboundDropResult {
+        let successfulEntries = receivers.flatMap { receiver in
+            var entries = [FileEntry?](
+                repeating: nil,
+                count: receiver.expectedFileCount
+            )
+            var unmatchedEntries: [FileEntry] = []
+            for receivedFile in receiver.receivedFiles {
+                guard let entry = receivedFile.entry else { continue }
+                if let fileIndex = receivedFile.fileIndex,
+                    entries.indices.contains(fileIndex),
+                    entries[fileIndex] == nil
+                {
+                    entries[fileIndex] = entry
+                } else {
+                    unmatchedEntries.append(entry)
+                }
+            }
+            for entry in unmatchedEntries {
+                if let index = entries.firstIndex(where: { $0 == nil }) {
+                    entries[index] = entry
+                } else {
+                    entries.append(entry)
+                }
+            }
+            return entries.compactMap { $0 }
+        }
+        let failures = receivers.flatMap { receiver in
+            receiver.receivedFiles.compactMap(\.failure)
+        }
+        return InboundDropResult(
+            successfulEntries: successfulEntries,
+            failures: failures
+        )
+    }
+}
+
 /// NSView-based drop target. Reads the raw drag pasteboard so we can see
 /// `public.file-url` even when a dragged item also exposes image data — SwiftUI's
 /// `.onDrop(of:)` filters the NSItemProvider to the most specific accepted type
@@ -433,173 +643,13 @@ struct ShelfDropTarget: NSViewRepresentable {
         private struct PromiseDrop {
             let receivers: [NSFilePromiseReceiver]
             let destinationURL: URL
-            var state: PromiseDropState
-        }
-
-        struct PromiseDropState {
-            private struct ReceivedFile {
-                let fileIndex: Int?
-                let entry: FileEntry?
-                let failure: InboundDropFailure?
-            }
-
-            private struct ReceiverState {
-                var fileNames: [String] = []
-                var expectedFileCount = 1
-                var receivedFiles: [ReceivedFile] = []
-                var claimedFileIndices: Set<Int> = []
-
-                var isComplete: Bool {
-                    receivedFiles.count >= expectedFileCount
-                }
-            }
-
-            private var receivers: [ReceiverState]
-
-            init(receiverCount: Int) {
-                receivers = (0..<receiverCount).map { _ in ReceiverState() }
-            }
-
-            mutating func configureReceiver(
-                at receiverIndex: Int,
-                fileNames: [String],
-                fileTypeCount: Int
-            ) {
-                precondition(receivers.indices.contains(receiverIndex))
-                precondition(receivers[receiverIndex].receivedFiles.isEmpty)
-                receivers[receiverIndex].fileNames = fileNames
-                receivers[receiverIndex].expectedFileCount = max(
-                    fileNames.count,
-                    fileTypeCount,
-                    1
-                )
-            }
-
-            @discardableResult
-            mutating func record(
-                _ entry: FileEntry,
-                fileURL: URL,
-                for receiverIndex: Int
-            ) -> Bool {
-                record(
-                    entry: entry,
-                    failure: nil,
-                    fileURL: fileURL,
-                    for: receiverIndex
-                )
-            }
-
-            @discardableResult
-            mutating func recordFailure(
-                _ failure: InboundDropFailure,
-                fileURL: URL,
-                for receiverIndex: Int
-            ) -> Bool {
-                record(
-                    entry: nil,
-                    failure: failure,
-                    fileURL: fileURL,
-                    for: receiverIndex
-                )
-            }
-
-            private mutating func record(
-                entry: FileEntry?,
-                failure: InboundDropFailure?,
-                fileURL: URL,
-                for receiverIndex: Int
-            ) -> Bool {
-                precondition(receivers.indices.contains(receiverIndex))
-                precondition((entry == nil) != (failure == nil))
-                var receiver = receivers[receiverIndex]
-                let wasExpected = receiver.receivedFiles.count < receiver.expectedFileCount
-                if !wasExpected {
-                    receiver.expectedFileCount += 1
-                }
-
-                let fileIndex: Int?
-                if entry != nil,
-                    let index = receiver.fileNames.indices.first(where: {
-                        !receiver.claimedFileIndices.contains($0)
-                            && receiver.fileNames[$0] == fileURL.lastPathComponent
-                    })
-                {
-                    receiver.claimedFileIndices.insert(index)
-                    fileIndex = index
-                } else {
-                    fileIndex = nil
-                }
-                receiver.receivedFiles.append(
-                    ReceivedFile(fileIndex: fileIndex, entry: entry, failure: failure)
-                )
-                receivers[receiverIndex] = receiver
-                return wasExpected
-            }
-
-            var isComplete: Bool {
-                receivers.allSatisfy(\.isComplete)
-            }
-
-            var result: InboundDropResult {
-                let successfulEntries = receivers.flatMap { receiver in
-                    var entries = [FileEntry?](
-                        repeating: nil,
-                        count: receiver.expectedFileCount
-                    )
-                    var unmatchedEntries: [FileEntry] = []
-                    for receivedFile in receiver.receivedFiles {
-                        guard let entry = receivedFile.entry else { continue }
-                        if let fileIndex = receivedFile.fileIndex,
-                            entries.indices.contains(fileIndex),
-                            entries[fileIndex] == nil
-                        {
-                            entries[fileIndex] = entry
-                        } else {
-                            unmatchedEntries.append(entry)
-                        }
-                    }
-                    for entry in unmatchedEntries {
-                        if let index = entries.firstIndex(where: { $0 == nil }) {
-                            entries[index] = entry
-                        } else {
-                            entries.append(entry)
-                        }
-                    }
-                    return entries.compactMap { $0 }
-                }
-                let failures = receivers.flatMap { receiver in
-                    receiver.receivedFiles.compactMap(\.failure)
-                }
-                return InboundDropResult(
-                    successfulEntries: successfulEntries,
-                    failures: failures
-                )
-            }
-        }
-
-        enum DropPlan {
-            case filePromise(NSFilePromiseReceiver)
-            case fileURL(URL)
-            case image(PendingImage)
-        }
-
-        struct PendingImage: Sendable {
-            let data: Data
-            let destinationURL: URL
+            var state: PromiseDropAccumulator
         }
 
         struct ImageWriteResult: Equatable, Sendable {
             let successfulURLs: [URL]
             let failures: [InboundDropFailure]
         }
-
-        private static let imageTypes: [(NSPasteboard.PasteboardType, String)] = [
-            (NSPasteboard.PasteboardType(UTType.png.identifier), "png"),
-            (NSPasteboard.PasteboardType(UTType.jpeg.identifier), "jpg"),
-            (NSPasteboard.PasteboardType(UTType.heic.identifier), "heic"),
-            (NSPasteboard.PasteboardType(UTType.tiff.identifier), "tiff"),
-            (NSPasteboard.PasteboardType(UTType.gif.identifier), "gif"),
-        ]
 
         private static let screenshotFormatter: DateFormatter = {
             let formatter = DateFormatter()
@@ -627,7 +677,7 @@ struct ShelfDropTarget: NSViewRepresentable {
                 NSPasteboard.PasteboardType($0)
             }
             types.append(.fileURL)
-            types.append(contentsOf: Self.imageTypes.map(\.0))
+            types.append(contentsOf: DropPasteboardInterpreter.supportedImageTypes.map(\.0))
             registerForDraggedTypes(types)
         }
 
@@ -652,12 +702,15 @@ struct ShelfDropTarget: NSViewRepresentable {
             }
 
             let pasteboard = sender.draggingPasteboard
-            let plans = makeDropPlans(from: pasteboard)
+            let interpreter = DropPasteboardInterpreter(
+                imageDestinationURL: droppedImageURL(pathExtension:)
+            )
+            let plans = interpreter.plans(from: pasteboard)
             guard !plans.isEmpty else { return false }
 
             var receivers: [NSFilePromiseReceiver] = []
             var entries: [FileEntry] = []
-            var images: [PendingImage] = []
+            var images: [DropPasteboardInterpreter.PendingImage] = []
             for plan in plans {
                 switch plan {
                 case .filePromise(let receiver):
@@ -682,28 +735,7 @@ struct ShelfDropTarget: NSViewRepresentable {
             source is FileDragSourceView ? [] : .copy
         }
 
-        func makeDropPlans(from pasteboard: NSPasteboard) -> [DropPlan] {
-            (pasteboard.pasteboardItems ?? []).compactMap { item in
-                if let receiver = Self.filePromiseReceiver(from: item) {
-                    return .filePromise(receiver)
-                }
-                if let url = Self.fileURL(from: item) {
-                    return .fileURL(url)
-                }
-                for (type, ext) in Self.imageTypes where item.types.contains(type) {
-                    guard let data = item.data(forType: type) else { continue }
-                    return .image(
-                        PendingImage(
-                            data: data,
-                            destinationURL: droppedImageURL(pathExtension: ext)
-                        )
-                    )
-                }
-                return nil
-            }
-        }
-
-        private func receiveImages(_ images: [PendingImage]) -> Bool {
+        private func receiveImages(_ images: [DropPasteboardInterpreter.PendingImage]) -> Bool {
             guard !images.isEmpty else { return false }
 
             onPromiseDropStarted()
@@ -745,7 +777,7 @@ struct ShelfDropTarget: NSViewRepresentable {
             }
 
             let dropID = UUID()
-            var state = PromiseDropState(receiverCount: receivers.count)
+            var state = PromiseDropAccumulator(receiverCount: receivers.count)
             onPromiseDropStarted()
             for (receiverIndex, receiver) in receivers.enumerated() {
                 let reader = Self.filePromiseReader { [weak self] fileURL, error in
@@ -788,7 +820,7 @@ struct ShelfDropTarget: NSViewRepresentable {
 
         static nonisolated func imageWriter(
             _ action: @escaping @MainActor @Sendable (ImageWriteResult) -> Void
-        ) -> @Sendable ([PendingImage]) -> Void {
+        ) -> @Sendable ([DropPasteboardInterpreter.PendingImage]) -> Void {
             { images in
                 var writtenURLs: [URL] = []
                 var failures: [InboundDropFailure] = []
@@ -889,31 +921,6 @@ struct ShelfDropTarget: NSViewRepresentable {
             let filename =
                 "Screenshot \(Self.screenshotFormatter.string(from: Date()))-\(UUID().uuidString).\(pathExtension)"
             return materializedFileStore.droppedImageURL(filename: filename)
-        }
-
-        private static func filePromiseReceiver(from item: NSPasteboardItem)
-            -> NSFilePromiseReceiver?
-        {
-            for rawType in NSFilePromiseReceiver.readableDraggedTypes {
-                let type = NSPasteboard.PasteboardType(rawType)
-                guard let propertyList = item.propertyList(forType: type) else { continue }
-                if let receiver = NSFilePromiseReceiver(
-                    pasteboardPropertyList: propertyList,
-                    ofType: type
-                ) {
-                    return receiver
-                }
-            }
-            return nil
-        }
-
-        private static func fileURL(from item: NSPasteboardItem) -> URL? {
-            guard let value = item.string(forType: .fileURL),
-                let url = URL(string: value),
-                url.isFileURL,
-                FileManager.default.fileExists(atPath: url.path)
-            else { return nil }
-            return url
         }
     }
 }
