@@ -31,7 +31,7 @@ run-release: build-release
 
 install: build-release
     mkdir -p "$HOME/Applications"
-    rsync --archive --delete --extended-attributes "{{ release_app_path }}/" "$HOME/Applications/Nab.app/"
+    rsync --archive --delete --extended-attributes "{{ release_app_path }}/" "$HOME/Applications/{{ app_name }}.app/"
 
 icon:
     xcrun swift Scripts/generate-app-icon.swift
