@@ -433,6 +433,12 @@ struct DropPasteboardInterpreter {
 
     func plans(from pasteboard: NSPasteboard) -> [Plan] {
         let items = pasteboard.pasteboardItems ?? []
+        let promiseReceivers =
+            pasteboard.readObjects(
+                forClasses: [NSFilePromiseReceiver.self],
+                options: nil
+            ) as? [NSFilePromiseReceiver] ?? []
+        var promiseReceiverIndex = 0
         var plans: [Plan] = []
         for (index, item) in items.enumerated() {
             var itemWasPlanned = false
@@ -442,7 +448,11 @@ struct DropPasteboardInterpreter {
             ]
             recordDiagnosticEvent("drop_item_inspection_started", itemDetails)
 
-            if let receiver = Self.filePromiseReceiver(from: item) {
+            if Self.hasFilePromiseRepresentation(item),
+                promiseReceivers.indices.contains(promiseReceiverIndex)
+            {
+                let receiver = promiseReceivers[promiseReceiverIndex]
+                promiseReceiverIndex += 1
                 recordDiagnosticEvent(
                     "drop_item_planned_as_file_promise",
                     itemDetails.merging([
@@ -501,20 +511,13 @@ struct DropPasteboardInterpreter {
         return plans
     }
 
-    private static func filePromiseReceiver(from item: NSPasteboardItem)
-        -> NSFilePromiseReceiver?
-    {
-        for rawType in NSFilePromiseReceiver.readableDraggedTypes {
-            let type = NSPasteboard.PasteboardType(rawType)
-            guard let propertyList = item.propertyList(forType: type) else { continue }
-            if let receiver = NSFilePromiseReceiver(
-                pasteboardPropertyList: propertyList,
-                ofType: type
-            ) {
-                return receiver
+    private static func hasFilePromiseRepresentation(_ item: NSPasteboardItem) -> Bool {
+        let readableTypes = Set(
+            NSFilePromiseReceiver.readableDraggedTypes.map {
+                NSPasteboard.PasteboardType($0)
             }
-        }
-        return nil
+        )
+        return !readableTypes.isDisjoint(with: item.types)
     }
 
     private static func fileURL(from item: NSPasteboardItem) -> URL? {

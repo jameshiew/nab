@@ -205,6 +205,39 @@ final class DragDropBridgesTests: XCTestCase {
         await fulfillment(of: [callback], timeout: 1)
     }
 
+    func testPromisePlanCanBeginFulfillmentThroughBackingPasteboard() throws {
+        let promiseDelegate = PromiseDelegate()
+        let promise = NSFilePromiseProvider(
+            fileType: "public.plain-text",
+            delegate: promiseDelegate
+        )
+        let pasteboard = makePasteboard(with: [promise])
+        let plans = makeInterpreter().plans(from: pasteboard)
+        guard case .filePromise(let receiver) = try XCTUnwrap(plans.first) else {
+            return XCTFail("Expected a file promise")
+        }
+        let destinationURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: destinationURL,
+            withIntermediateDirectories: true
+        )
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: destinationURL)
+        }
+        let operationQueue = OperationQueue()
+
+        receiver.receivePromisedFiles(
+            atDestination: destinationURL,
+            options: [:],
+            operationQueue: operationQueue,
+            reader: { _, _ in }
+        )
+
+        XCTAssertEqual(receiver.fileTypes, ["public.plain-text"])
+        withExtendedLifetime((promiseDelegate, promise, pasteboard, operationQueue)) {}
+    }
+
     func testPromiseAccumulatorWaitsForTwoSuccessfulCallbacksFromOneReceiver() {
         var state = PromiseDropAccumulator(receiverCount: 1)
         state.configureReceiver(
