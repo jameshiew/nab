@@ -1,27 +1,20 @@
 app_name := "Nab"
-project := "Nab.xcodeproj"
-scheme := "Nab"
-host_arch := `uname -m`
-destination := "platform=macOS,arch=" + host_arch
-debug_app_path := "build/Build/Products/Debug/Nab.app"
-release_app_path := "build/Build/Products/Release/Nab.app"
+debug_app_path := "build/debug/Nab.app"
+release_app_path := "build/release/Nab.app"
 
 run-debug: build-debug
     open {{ debug_app_path }}
 
 build-debug:
-    xcodebuild -quiet -project {{ project }} -scheme {{ scheme }} -destination "{{ destination }}" -configuration Debug -derivedDataPath build build
+    Scripts/build-app.sh debug
 
 build-release:
-    xcodebuild -quiet -project {{ project }} -scheme {{ scheme }} -destination "{{ destination }}" -configuration Release -derivedDataPath build build
+    Scripts/build-app.sh release
 
 test:
-    xcodebuild -quiet -project {{ project }} -scheme {{ scheme }} -destination "{{ destination }}" -configuration Debug -derivedDataPath build test
+    swift test --parallel
 
-audit:
-    xcodebuild -quiet -project {{ project }} -scheme {{ scheme }} -destination "{{ destination }}" -configuration Debug -derivedDataPath build analyze
-
-verify: lint audit test build-debug
+verify: lint test build-debug
 
 run:
     open {{ debug_app_path }}
@@ -34,15 +27,14 @@ install: build-release
     rsync --archive --delete --extended-attributes "{{ release_app_path }}/" "$HOME/Applications/{{ app_name }}.app/"
 
 icon:
-    xcrun swift Scripts/generate-app-icon.swift
+    swift Scripts/generate-app-icon.swift
 
 fmt:
-    xcrun swift-format format -i -r Nab/ NabTests/
+    swift format --in-place --recursive Package.swift Nab/ NabTests/ Scripts/
 
 lint:
-    xcrun swift-format lint -r Nab/ NabTests/
+    swift format lint --strict --recursive Package.swift Nab/ NabTests/ Scripts/
 
 clean:
-    trash build
-    xcodebuild -quiet -project {{ project }} -scheme {{ scheme }} -destination "{{ destination }}" -configuration Debug clean
-    xcodebuild -quiet -project {{ project }} -scheme {{ scheme }} -destination "{{ destination }}" -configuration Release -derivedDataPath build clean
+    swift package clean
+    if test -d build; then trash build; fi

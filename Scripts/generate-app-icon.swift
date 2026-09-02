@@ -1,11 +1,11 @@
-#!/usr/bin/env xcrun swift
+#!/usr/bin/env swift
 
 // Generates the Nab app icon: a tray glyph, echoing the menu bar icon, on a
 // blue squircle. Drawn with Core Graphics so the icon lives in the repo as
 // code rather than as an opaque binary asset.
 //
-// Usage: Scripts/generate-app-icon.swift [output-appiconset-directory]
-// Defaults to Nab/Assets.xcassets/AppIcon.appiconset.
+// Usage: Scripts/generate-app-icon.swift [output-iconset-directory]
+// Defaults to Resources/AppIcon.iconset.
 
 import AppKit
 import CoreGraphics
@@ -235,36 +235,10 @@ private func filename(points: Int, scale: Int) -> String {
     "icon_\(points)x\(points)\(scale == 1 ? "" : "@\(scale)x").png"
 }
 
-private func contentsJSON() -> Data {
-    let images = variants.map { variant in
-        """
-            {
-              "filename" : "\(filename(points: variant.points, scale: variant.scale))",
-              "idiom" : "mac",
-              "scale" : "\(variant.scale)x",
-              "size" : "\(variant.points)x\(variant.points)"
-            }
-        """
-    }
-    let json = """
-        {
-          "images" : [
-        \(images.joined(separator: ",\n"))
-          ],
-          "info" : {
-            "author" : "xcode",
-            "version" : 1
-          }
-        }
-
-        """
-    return Data(json.utf8)
-}
-
 let outputDirectory = URL(
     fileURLWithPath: CommandLine.arguments.count > 1
         ? CommandLine.arguments[1]
-        : "Nab/Assets.xcassets/AppIcon.appiconset"
+        : "Resources/AppIcon.iconset"
 )
 try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
@@ -273,5 +247,3 @@ for variant in variants {
     try renderPNG(pixels: variant.points * variant.scale).write(to: outputDirectory.appending(path: name))
     print("wrote \(name)")
 }
-try contentsJSON().write(to: outputDirectory.appending(path: "Contents.json"))
-print("wrote Contents.json")
