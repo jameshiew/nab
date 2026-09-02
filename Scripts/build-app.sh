@@ -26,4 +26,9 @@ binary_path="$(swift build --configuration "$configuration" --show-bin-path)/Nab
 /usr/bin/install -m 644 Resources/Info.plist "$contents_path/Info.plist"
 /usr/bin/iconutil --convert icns --output "$contents_path/Resources/AppIcon.icns" Resources/AppIcon.iconset
 /usr/bin/xcrun dsymutil "$binary_path" -o "$app_path.dSYM"
-/usr/bin/codesign --force --sign - --options runtime --timestamp=none "$app_path"
+if [ "$configuration" = "debug" ]; then
+    /usr/bin/codesign --force --sign - --options runtime --timestamp=none \
+        --entitlements Resources/NabDebug.entitlements "$app_path"
+else
+    /usr/bin/codesign --force --sign - --options runtime --timestamp=none "$app_path"
+fi
