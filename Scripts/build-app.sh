@@ -25,4 +25,5 @@ binary_path="$(swift build --configuration "$configuration" --show-bin-path)/Nab
 /usr/bin/install -m 755 "$binary_path" "$contents_path/MacOS/Nab"
 /usr/bin/install -m 644 Resources/Info.plist "$contents_path/Info.plist"
 /usr/bin/iconutil --convert icns --output "$contents_path/Resources/AppIcon.icns" Resources/AppIcon.iconset
+/usr/bin/xcrun dsymutil "$binary_path" -o "$app_path.dSYM"
 /usr/bin/codesign --force --sign - --options runtime --timestamp=none "$app_path"

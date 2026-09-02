@@ -399,6 +399,8 @@ struct InboundDropResult: Equatable {
 }
 
 struct DropPasteboardInterpreter {
+    typealias DiagnosticEvent = (_ name: String, _ details: [String: String]) -> Void
+
     enum Plan {
         case filePromise(NSFilePromiseReceiver)
         case fileURL(URL)
@@ -419,26 +421,84 @@ struct DropPasteboardInterpreter {
     ]
 
     let imageDestinationURL: (String) -> URL
+    let recordDiagnosticEvent: DiagnosticEvent
+
+    init(
+        imageDestinationURL: @escaping (String) -> URL,
+        recordDiagnosticEvent: @escaping DiagnosticEvent = { _, _ in }
+    ) {
+        self.imageDestinationURL = imageDestinationURL
+        self.recordDiagnosticEvent = recordDiagnosticEvent
+    }
 
     func plans(from pasteboard: NSPasteboard) -> [Plan] {
-        (pasteboard.pasteboardItems ?? []).compactMap { item in
+        let items = pasteboard.pasteboardItems ?? []
+        var plans: [Plan] = []
+        for (index, item) in items.enumerated() {
+            var itemWasPlanned = false
+            let itemDetails = [
+                "item_index": String(index),
+                "types": item.types.map(\.rawValue).sorted().joined(separator: ","),
+            ]
+            recordDiagnosticEvent("drop_item_inspection_started", itemDetails)
+
             if let receiver = Self.filePromiseReceiver(from: item) {
-                return .filePromise(receiver)
+                recordDiagnosticEvent(
+                    "drop_item_planned_as_file_promise",
+                    itemDetails.merging([
+                        "advertised_file_count": String(receiver.fileNames.count),
+                        "advertised_type_count": String(receiver.fileTypes.count),
+                    ]) { _, new in new }
+                )
+                plans.append(.filePromise(receiver))
+                itemWasPlanned = true
+                continue
             }
+            recordDiagnosticEvent("drop_item_file_promise_absent", itemDetails)
+
             if let url = Self.fileURL(from: item) {
-                return .fileURL(url)
+                recordDiagnosticEvent("drop_item_planned_as_file_url", itemDetails)
+                plans.append(.fileURL(url))
+                itemWasPlanned = true
+                continue
             }
+            recordDiagnosticEvent("drop_item_file_url_absent", itemDetails)
+
             for (type, ext) in Self.supportedImageTypes where item.types.contains(type) {
-                guard let data = item.data(forType: type) else { continue }
-                return .image(
-                    PendingImage(
-                        data: data,
-                        destinationURL: imageDestinationURL(ext)
+                recordDiagnosticEvent(
+                    "drop_item_image_read_started",
+                    itemDetails.merging(["image_type": type.rawValue]) { _, new in new }
+                )
+                guard let data = item.data(forType: type) else {
+                    recordDiagnosticEvent(
+                        "drop_item_image_read_returned_no_data",
+                        itemDetails.merging(["image_type": type.rawValue]) { _, new in new }
+                    )
+                    continue
+                }
+                recordDiagnosticEvent(
+                    "drop_item_planned_as_image",
+                    itemDetails.merging([
+                        "byte_count": String(data.count),
+                        "image_type": type.rawValue,
+                    ]) { _, new in new }
+                )
+                plans.append(
+                    .image(
+                        PendingImage(
+                            data: data,
+                            destinationURL: imageDestinationURL(ext)
+                        )
                     )
                 )
+                itemWasPlanned = true
+                break
             }
-            return nil
+            if !itemWasPlanned {
+                recordDiagnosticEvent("drop_item_unsupported", itemDetails)
+            }
         }
+        return plans
     }
 
     private static func filePromiseReceiver(from item: NSPasteboardItem)
@@ -684,7 +744,17 @@ struct ShelfDropTarget: NSViewRepresentable {
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
         override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-            Self.dragOperation(forSource: sender.draggingSource)
+            let operation = Self.dragOperation(forSource: sender.draggingSource)
+            DiagnosticsRecorder.shared.record(
+                "drop_dragging_entered",
+                details: [
+                    "accepted": String(!operation.isEmpty),
+                    "pasteboard_item_count": String(
+                        sender.draggingPasteboard.pasteboardItems?.count ?? 0
+                    ),
+                ]
+            )
+            return operation
         }
 
         override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -692,21 +762,52 @@ struct ShelfDropTarget: NSViewRepresentable {
         }
 
         override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
-            !Self.dragOperation(forSource: sender.draggingSource).isEmpty
+            let accepted = !Self.dragOperation(forSource: sender.draggingSource).isEmpty
+            DiagnosticsRecorder.shared.record(
+                "drop_preparation_finished",
+                details: ["accepted": String(accepted)]
+            )
+            return accepted
         }
 
         override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            let dropID = UUID()
+            let diagnosticDropID = dropID.uuidString.lowercased()
             guard !Self.dragOperation(forSource: sender.draggingSource).isEmpty else {
+                DiagnosticsRecorder.shared.record(
+                    "drop_rejected_as_internal",
+                    details: ["drop_id": diagnosticDropID]
+                )
                 ShelfFeedback.rejectedDrop()
                 return false
             }
 
             let pasteboard = sender.draggingPasteboard
+            DiagnosticsRecorder.shared.record(
+                "drop_perform_started",
+                details: [
+                    "change_count": String(pasteboard.changeCount),
+                    "drop_id": diagnosticDropID,
+                    "pasteboard_item_count": String(pasteboard.pasteboardItems?.count ?? 0),
+                ]
+            )
             let interpreter = DropPasteboardInterpreter(
-                imageDestinationURL: droppedImageURL(pathExtension:)
+                imageDestinationURL: droppedImageURL(pathExtension:),
+                recordDiagnosticEvent: { name, details in
+                    DiagnosticsRecorder.shared.record(
+                        name,
+                        details: details.merging(["drop_id": diagnosticDropID]) { _, new in new }
+                    )
+                }
             )
             let plans = interpreter.plans(from: pasteboard)
-            guard !plans.isEmpty else { return false }
+            guard !plans.isEmpty else {
+                DiagnosticsRecorder.shared.record(
+                    "drop_finished_without_supported_items",
+                    details: ["drop_id": diagnosticDropID]
+                )
+                return false
+            }
 
             var receivers: [NSFilePromiseReceiver] = []
             var entries: [FileEntry] = []
@@ -721,13 +822,40 @@ struct ShelfDropTarget: NSViewRepresentable {
                     images.append(image)
                 }
             }
+            DiagnosticsRecorder.shared.record(
+                "drop_plans_ready",
+                details: [
+                    "direct_file_count": String(entries.count),
+                    "drop_id": diagnosticDropID,
+                    "image_count": String(images.count),
+                    "promise_count": String(receivers.count),
+                ]
+            )
 
-            var accepted = receiveFilePromises(receivers)
+            var accepted = receiveFilePromises(receivers, dropID: dropID)
             if !entries.isEmpty {
+                DiagnosticsRecorder.shared.record(
+                    "drop_direct_files_delivery_started",
+                    details: [
+                        "drop_id": diagnosticDropID,
+                        "entry_count": String(entries.count),
+                    ]
+                )
                 onDrop(InboundDropResult(successfulEntries: entries))
+                DiagnosticsRecorder.shared.record(
+                    "drop_direct_files_delivery_finished",
+                    details: ["drop_id": diagnosticDropID]
+                )
                 accepted = true
             }
-            accepted = receiveImages(images) || accepted
+            accepted = receiveImages(images, dropID: dropID) || accepted
+            DiagnosticsRecorder.shared.record(
+                "drop_perform_finished",
+                details: [
+                    "accepted": String(accepted),
+                    "drop_id": diagnosticDropID,
+                ]
+            )
             return accepted
         }
 
@@ -735,12 +863,32 @@ struct ShelfDropTarget: NSViewRepresentable {
             source is FileDragSourceView ? [] : .copy
         }
 
-        private func receiveImages(_ images: [DropPasteboardInterpreter.PendingImage]) -> Bool {
+        private func receiveImages(
+            _ images: [DropPasteboardInterpreter.PendingImage],
+            dropID: UUID
+        ) -> Bool {
             guard !images.isEmpty else { return false }
 
+            let diagnosticDropID = dropID.uuidString.lowercased()
+            DiagnosticsRecorder.shared.record(
+                "drop_image_materialization_queued",
+                details: [
+                    "drop_id": diagnosticDropID,
+                    "image_count": String(images.count),
+                    "total_byte_count": String(images.reduce(0) { $0 + $1.data.count }),
+                ]
+            )
             onPromiseDropStarted()
             let writer = Self.imageWriter { [self] result in
                 defer { onPromiseDropFinished() }
+                DiagnosticsRecorder.shared.record(
+                    "drop_image_materialization_finished",
+                    details: [
+                        "drop_id": diagnosticDropID,
+                        "failure_count": String(result.failures.count),
+                        "success_count": String(result.successfulURLs.count),
+                    ]
+                )
                 for failure in result.failures {
                     Log.shelf.error(
                         "Failed to materialize dropped image: \(failure.errorDescription, privacy: .private)"
@@ -749,11 +897,22 @@ struct ShelfDropTarget: NSViewRepresentable {
                 let entries = result.successfulURLs.map {
                     FileEntry(url: $0, isMaterializedByNab: true)
                 }
+                DiagnosticsRecorder.shared.record(
+                    "drop_image_delivery_started",
+                    details: [
+                        "drop_id": diagnosticDropID,
+                        "entry_count": String(entries.count),
+                    ]
+                )
                 onDrop(
                     InboundDropResult(
                         successfulEntries: entries,
                         failures: result.failures
                     )
+                )
+                DiagnosticsRecorder.shared.record(
+                    "drop_image_delivery_finished",
+                    details: ["drop_id": diagnosticDropID]
                 )
             }
             let pendingImages = images
@@ -763,23 +922,49 @@ struct ShelfDropTarget: NSViewRepresentable {
             return true
         }
 
-        private func receiveFilePromises(_ receivers: [NSFilePromiseReceiver]) -> Bool {
+        private func receiveFilePromises(
+            _ receivers: [NSFilePromiseReceiver],
+            dropID: UUID
+        ) -> Bool {
             guard !receivers.isEmpty else { return false }
 
+            let diagnosticDropID = dropID.uuidString.lowercased()
+            DiagnosticsRecorder.shared.record(
+                "drop_file_promise_preparation_started",
+                details: [
+                    "drop_id": diagnosticDropID,
+                    "receiver_count": String(receivers.count),
+                ]
+            )
             let destination: URL
             do {
                 destination = try materializedFileStore.createPromisedFileDirectory()
             } catch {
+                DiagnosticsRecorder.shared.record(
+                    "drop_file_promise_preparation_failed",
+                    details: [
+                        "drop_id": diagnosticDropID,
+                        "error_type": String(reflecting: type(of: error)),
+                    ]
+                )
                 Log.shelf.error(
                     "Failed to prepare promised-file drop: \(error.localizedDescription, privacy: .private)"
                 )
                 return false
             }
 
-            let dropID = UUID()
             var state = PromiseDropAccumulator(receiverCount: receivers.count)
             onPromiseDropStarted()
             for (receiverIndex, receiver) in receivers.enumerated() {
+                DiagnosticsRecorder.shared.record(
+                    "drop_file_promise_receiver_started",
+                    details: [
+                        "advertised_file_count": String(receiver.fileNames.count),
+                        "advertised_type_count": String(receiver.fileTypes.count),
+                        "drop_id": diagnosticDropID,
+                        "receiver_index": String(receiverIndex),
+                    ]
+                )
                 let reader = Self.filePromiseReader { [weak self] fileURL, error in
                     self?.promisedFileDidArrive(
                         fileURL,
@@ -804,6 +989,10 @@ struct ShelfDropTarget: NSViewRepresentable {
                 receivers: receivers,
                 destinationURL: destination,
                 state: state
+            )
+            DiagnosticsRecorder.shared.record(
+                "drop_file_promise_callbacks_pending",
+                details: ["drop_id": diagnosticDropID]
             )
             return true
         }
@@ -854,6 +1043,15 @@ struct ShelfDropTarget: NSViewRepresentable {
             for dropID: UUID,
             receiverIndex: Int
         ) {
+            let diagnosticDropID = dropID.uuidString.lowercased()
+            DiagnosticsRecorder.shared.record(
+                "drop_file_promise_callback_started",
+                details: [
+                    "drop_id": diagnosticDropID,
+                    "has_error": String(error != nil),
+                    "receiver_index": String(receiverIndex),
+                ]
+            )
             let entry: FileEntry?
             let failure: InboundDropFailure?
             if let error {
@@ -876,6 +1074,10 @@ struct ShelfDropTarget: NSViewRepresentable {
             }
 
             guard var drop = promiseDrops[dropID] else {
+                DiagnosticsRecorder.shared.record(
+                    "drop_file_promise_callback_after_completion",
+                    details: ["drop_id": diagnosticDropID]
+                )
                 Log.shelf.fault("Received a promised-file callback after its drop finished")
                 if let entry {
                     onDrop(InboundDropResult(successfulEntries: [entry]))
@@ -900,10 +1102,21 @@ struct ShelfDropTarget: NSViewRepresentable {
                 preconditionFailure("Promised-file callbacks require one result")
             }
             if !wasExpected {
+                DiagnosticsRecorder.shared.record(
+                    "drop_file_promise_unadvertised_callback",
+                    details: ["drop_id": diagnosticDropID]
+                )
                 Log.shelf.fault("Received more promised files than the receiver advertised")
             }
 
             if !drop.state.isComplete {
+                DiagnosticsRecorder.shared.record(
+                    "drop_file_promise_callback_recorded",
+                    details: [
+                        "drop_id": diagnosticDropID,
+                        "receiver_index": String(receiverIndex),
+                    ]
+                )
                 promiseDrops[dropID] = drop
                 return
             }
@@ -913,7 +1126,19 @@ struct ShelfDropTarget: NSViewRepresentable {
             if result.successfulEntries.isEmpty {
                 materializedFileStore.moveToTrash([drop.destinationURL])
             }
+            DiagnosticsRecorder.shared.record(
+                "drop_file_promise_delivery_started",
+                details: [
+                    "drop_id": diagnosticDropID,
+                    "failure_count": String(result.failures.count),
+                    "success_count": String(result.successfulEntries.count),
+                ]
+            )
             onDrop(result)
+            DiagnosticsRecorder.shared.record(
+                "drop_file_promise_delivery_finished",
+                details: ["drop_id": diagnosticDropID]
+            )
             onPromiseDropFinished()
         }
 

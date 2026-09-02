@@ -5,6 +5,9 @@ release_app_path := "build/release/Nab.app"
 run-debug: build-debug
     open {{ debug_app_path }}
 
+run-debug-attached: build-debug
+    "{{ debug_app_path }}/Contents/MacOS/Nab"
+
 build-debug:
     Scripts/build-app.sh debug
 
@@ -13,6 +16,9 @@ build-release:
 
 test:
     swift test --parallel
+
+collect-diagnostics:
+    Scripts/collect-diagnostics.sh
 
 verify: lint test build-debug
 

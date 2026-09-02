@@ -59,12 +59,34 @@ struct ShelfView: View {
     }
 
     private func handleDrop(_ result: InboundDropResult) {
+        DiagnosticsRecorder.shared.record(
+            "shelf_drop_result_received",
+            details: [
+                "failure_count": String(result.failures.count),
+                "successful_entry_count": String(result.successfulEntries.count),
+            ]
+        )
         ShelfDropResultHandler(
-            addEntries: { model.add($0) },
+            addEntries: {
+                let addResult = model.add($0)
+                DiagnosticsRecorder.shared.record(
+                    "shelf_drop_entries_added",
+                    details: [
+                        "added_count": String(addResult.added),
+                        "duplicate_count": String(addResult.duplicates),
+                        "shelf_item_count": String(model.items.count),
+                    ]
+                )
+                return addResult
+            },
             rejectDrop: ShelfFeedback.rejectedDrop,
             onDropReceived: onDropReceived,
             onDropPartiallyFailed: onDropPartiallyFailed
         ).handle(result)
+        DiagnosticsRecorder.shared.record(
+            "shelf_drop_result_handled",
+            details: ["shelf_item_count": String(model.items.count)]
+        )
     }
 
     private var header: some View {

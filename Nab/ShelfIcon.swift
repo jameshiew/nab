@@ -138,6 +138,16 @@ struct ShelfIcon: View {
             thumbnail = nil
             return
         }
+        let diagnosticDetails = [
+            "entry_count": String(item.entries.count),
+            "is_materialized": String(item.entries.contains { $0.isMaterializedByNab }),
+            "item_id": item.id.uuidString.lowercased(),
+            "path_extension": item.primaryURL.pathExtension.lowercased(),
+        ]
+        DiagnosticsRecorder.shared.record(
+            "thumbnail_generation_started",
+            details: diagnosticDetails
+        )
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
         let request = QLThumbnailGenerator.Request(
             fileAt: item.primaryURL,
@@ -145,11 +155,25 @@ struct ShelfIcon: View {
             scale: scale,
             representationTypes: .thumbnail
         )
-        if let rep = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request) {
+        do {
+            let representation = try await QLThumbnailGenerator.shared.generateBestRepresentation(
+                for: request
+            )
             guard !Task.isCancelled else { return }
-            thumbnail = rep.nsImage
-        } else if !Task.isCancelled {
+            thumbnail = representation.nsImage
+            DiagnosticsRecorder.shared.record(
+                "thumbnail_generation_finished",
+                details: diagnosticDetails
+            )
+        } catch {
+            guard !Task.isCancelled else { return }
             thumbnail = nil
+            DiagnosticsRecorder.shared.record(
+                "thumbnail_generation_failed",
+                details: diagnosticDetails.merging([
+                    "error_type": String(reflecting: type(of: error))
+                ]) { _, new in new }
+            )
         }
     }
 }

@@ -24,6 +24,9 @@ private struct NabMenu: View {
             .keyboardShortcut(",")
         Divider()
         Button("About Nab", action: showAbout)
+        Button("Reveal Diagnostics in Finder") {
+            DiagnosticsRecorder.shared.revealInFinder()
+        }
         Divider()
         Button("Quit Nab") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
