@@ -671,6 +671,69 @@ struct PromiseDropAccumulator {
     }
 }
 
+struct LegacyEmailPromiseMonitor {
+    private struct FileState: Equatable {
+        let url: URL
+        let fileSize: Int?
+        let modificationDate: Date?
+    }
+
+    let expectedFileNames: [String]
+    let expectedFileCount: Int
+    private var previousState: [FileState]?
+
+    init(expectedFileNames: [String], fallbackExpectedFileCount: Int) {
+        self.expectedFileNames = expectedFileNames
+        expectedFileCount = max(expectedFileNames.count, fallbackExpectedFileCount, 1)
+    }
+
+    mutating func completedURLs(in destinationURL: URL) -> [URL]? {
+        let manager = FileManager.default
+        guard
+            let contents = try? manager.contentsOfDirectory(
+                at: destinationURL,
+                includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]
+            )
+        else { return nil }
+
+        let emailURLs = contents.filter { url in
+            guard let type = UTType(filenameExtension: url.pathExtension) else { return false }
+            return type.conforms(to: .emailMessage)
+        }
+        guard emailURLs.count >= expectedFileCount else { return nil }
+
+        var claimedURLs: Set<URL> = []
+        let expectedURLs = expectedFileNames.compactMap { name -> URL? in
+            guard
+                let match = emailURLs.first(where: {
+                    !claimedURLs.contains($0)
+                        && $0.lastPathComponent == URL(fileURLWithPath: name).lastPathComponent
+                })
+            else { return nil }
+            claimedURLs.insert(match)
+            return match
+        }
+        let remainingURLs =
+            emailURLs
+            .filter { !claimedURLs.contains($0) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        let orderedURLs = expectedURLs + remainingURLs
+        let currentState = orderedURLs.map { url in
+            let values = try? url.resourceValues(forKeys: [
+                .contentModificationDateKey,
+                .fileSizeKey,
+            ])
+            return FileState(
+                url: url,
+                fileSize: values?.fileSize,
+                modificationDate: values?.contentModificationDate
+            )
+        }
+        defer { previousState = currentState }
+        return currentState == previousState ? orderedURLs : nil
+    }
+}
+
 /// NSView-based drop target. Reads the raw drag pasteboard so we can see
 /// `public.file-url` even when a dragged item also exposes image data — SwiftUI's
 /// `.onDrop(of:)` filters the NSItemProvider to the most specific accepted type
@@ -733,6 +796,7 @@ struct ShelfDropTarget: NSViewRepresentable {
             return queue
         }()
         private var promiseDrops: [UUID: PromiseDrop] = [:]
+        private var legacyEmailPromiseTasks: [UUID: Task<Void, Never>] = [:]
 
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
@@ -835,7 +899,17 @@ struct ShelfDropTarget: NSViewRepresentable {
                 ]
             )
 
-            var accepted = receiveFilePromises(receivers, dropID: dropID)
+            let receivesEmailThroughLegacyPromise = receivers.contains {
+                Self.requiresLegacyEmailPromise(forFileTypes: $0.fileTypes)
+            }
+            var accepted =
+                receivesEmailThroughLegacyPromise
+                ? receiveLegacyEmailPromises(
+                    from: sender,
+                    fallbackExpectedFileCount: receivers.count,
+                    dropID: dropID
+                )
+                : receiveFilePromises(receivers, dropID: dropID)
             if !entries.isEmpty {
                 DiagnosticsRecorder.shared.record(
                     "drop_direct_files_delivery_started",
@@ -864,6 +938,122 @@ struct ShelfDropTarget: NSViewRepresentable {
 
         static func dragOperation(forSource source: Any?) -> NSDragOperation {
             source is FileDragSourceView ? [] : .copy
+        }
+
+        static func requiresLegacyEmailPromise(forFileTypes fileTypes: [String]) -> Bool {
+            fileTypes.contains { rawType in
+                UTType(rawType)?.conforms(to: .emailMessage) == true
+            }
+        }
+
+        static func legacyPromisedFileNames(
+            from source: AnyObject,
+            at destinationURL: URL,
+            selector: Selector = NSSelectorFromString(
+                "namesOfPromisedFilesDroppedAtDestination:"
+            )
+        ) -> [String] {
+            guard source.responds(to: selector),
+                let result = source.perform(selector, with: destinationURL)
+            else { return [] }
+            return result.takeUnretainedValue() as? [String] ?? []
+        }
+
+        private func receiveLegacyEmailPromises(
+            from sender: NSDraggingInfo,
+            fallbackExpectedFileCount: Int,
+            dropID: UUID
+        ) -> Bool {
+            let diagnosticDropID = dropID.uuidString.lowercased()
+            let destinationURL: URL
+            do {
+                destinationURL = try materializedFileStore.createPromisedFileDirectory()
+            } catch {
+                DiagnosticsRecorder.shared.record(
+                    "drop_legacy_email_promise_preparation_failed",
+                    details: [
+                        "drop_id": diagnosticDropID,
+                        "error_type": String(reflecting: type(of: error)),
+                    ]
+                )
+                return false
+            }
+
+            onPromiseDropStarted()
+            let fileNames = Self.legacyPromisedFileNames(
+                from: sender,
+                at: destinationURL
+            )
+            DiagnosticsRecorder.shared.record(
+                "drop_legacy_email_promise_monitoring_started",
+                details: [
+                    "drop_id": diagnosticDropID,
+                    "expected_file_count": String(
+                        max(fileNames.count, fallbackExpectedFileCount, 1)
+                    ),
+                    "returned_file_name_count": String(fileNames.count),
+                ]
+            )
+
+            var monitor = LegacyEmailPromiseMonitor(
+                expectedFileNames: fileNames,
+                fallbackExpectedFileCount: fallbackExpectedFileCount
+            )
+            legacyEmailPromiseTasks[dropID] = Task { @MainActor [weak self] in
+                let deadline = ContinuousClock.now + .seconds(60)
+                while !Task.isCancelled, ContinuousClock.now < deadline {
+                    if let urls = monitor.completedURLs(in: destinationURL) {
+                        self?.finishLegacyEmailPromiseDrop(
+                            dropID: dropID,
+                            destinationURL: destinationURL,
+                            urls: urls,
+                            failure: nil
+                        )
+                        return
+                    }
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+                guard !Task.isCancelled else { return }
+                self?.finishLegacyEmailPromiseDrop(
+                    dropID: dropID,
+                    destinationURL: destinationURL,
+                    urls: [],
+                    failure: InboundDropFailure(
+                        errorDescription: "The promised email was not received."
+                    )
+                )
+            }
+            return true
+        }
+
+        private func finishLegacyEmailPromiseDrop(
+            dropID: UUID,
+            destinationURL: URL,
+            urls: [URL],
+            failure: InboundDropFailure?
+        ) {
+            legacyEmailPromiseTasks.removeValue(forKey: dropID)
+            let failures = failure.map { [$0] } ?? []
+            if urls.isEmpty {
+                materializedFileStore.moveToTrash([destinationURL])
+            }
+            DiagnosticsRecorder.shared.record(
+                "drop_legacy_email_promise_delivery_started",
+                details: [
+                    "drop_id": dropID.uuidString.lowercased(),
+                    "failure_count": String(failures.count),
+                    "success_count": String(urls.count),
+                ]
+            )
+            onDrop(
+                InboundDropResult(
+                    successfulEntries: urls.map {
+                        FileEntry(url: $0, isMaterializedByNab: true)
+                    },
+                    failures: failures
+                )
+            )
+            onPromiseDropFinished()
         }
 
         private func receiveImages(

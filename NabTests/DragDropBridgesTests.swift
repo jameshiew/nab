@@ -1,10 +1,21 @@
 import AppKit
+import UniformTypeIdentifiers
 import XCTest
 
 @testable import Nab
 
 @MainActor
 final class DragDropBridgesTests: XCTestCase {
+    private final class LegacyPromiseSource: NSObject {
+        var receivedDestinationURL: URL?
+
+        @objc(promisedFileNamesForTest:)
+        func promisedFileNamesForTest(at destinationURL: URL) -> [String] {
+            receivedDestinationURL = destinationURL
+            return ["message.eml"]
+        }
+    }
+
     private final class PromiseDelegate: NSObject, NSFilePromiseProviderDelegate {
         func filePromiseProvider(
             _ filePromiseProvider: NSFilePromiseProvider,
@@ -44,6 +55,33 @@ final class DragDropBridgesTests: XCTestCase {
 
         XCTAssertTrue(Set(promiseTypes).isSubset(of: Set(view.registeredDraggedTypes)))
         XCTAssertTrue(view.registeredDraggedTypes.contains(.fileURL))
+    }
+
+    func testMailEmailPromisesUseLegacyDraggingInfoPath() {
+        XCTAssertTrue(
+            ShelfDropTarget.DropView.requiresLegacyEmailPromise(
+                forFileTypes: ["com.apple.mail.email"]
+            )
+        )
+        XCTAssertFalse(
+            ShelfDropTarget.DropView.requiresLegacyEmailPromise(
+                forFileTypes: [UTType.png.identifier, UTType.plainText.identifier]
+            )
+        )
+    }
+
+    func testLegacyPromiseCompatibilityShimRequestsDestination() {
+        let source = LegacyPromiseSource()
+        let destinationURL = URL(fileURLWithPath: "/tmp/Nab Mail Drop", isDirectory: true)
+
+        let names = ShelfDropTarget.DropView.legacyPromisedFileNames(
+            from: source,
+            at: destinationURL,
+            selector: #selector(LegacyPromiseSource.promisedFileNamesForTest(at:))
+        )
+
+        XCTAssertEqual(names, ["message.eml"])
+        XCTAssertEqual(source.receivedDestinationURL, destinationURL)
     }
 
     func testShelfOriginatingDragIsRejected() {
@@ -303,6 +341,43 @@ final class DragDropBridgesTests: XCTestCase {
         XCTAssertTrue(state.isComplete)
         XCTAssertEqual(state.result.successfulEntries.map(\.url), [keptURL])
         XCTAssertEqual(state.result.failures, [failure])
+    }
+
+    func testLegacyEmailPromiseMonitorWaitsForStableFilesAndPreservesOrder() throws {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true
+        )
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+        let firstURL = directoryURL.appendingPathComponent("first.eml")
+        let secondURL = directoryURL.appendingPathComponent("second.eml")
+        try Data("first".utf8).write(to: firstURL)
+        try Data("second".utf8).write(to: secondURL)
+        try Data("partial".utf8).write(
+            to: directoryURL.appendingPathComponent("partial.download")
+        )
+        var monitor = LegacyEmailPromiseMonitor(
+            expectedFileNames: [secondURL.lastPathComponent, firstURL.lastPathComponent],
+            fallbackExpectedFileCount: 1
+        )
+
+        XCTAssertNil(monitor.completedURLs(in: directoryURL))
+        XCTAssertEqual(
+            monitor.completedURLs(in: directoryURL)?.map(\.lastPathComponent),
+            [secondURL, firstURL].map(\.lastPathComponent)
+        )
+
+        try Data("second file grew".utf8).write(to: secondURL)
+
+        XCTAssertNil(monitor.completedURLs(in: directoryURL))
+        XCTAssertEqual(
+            monitor.completedURLs(in: directoryURL)?.map(\.lastPathComponent),
+            [secondURL, firstURL].map(\.lastPathComponent)
+        )
     }
 
     func testPartiallyFailedPromiseDropRequestsVisibleFeedback() {
