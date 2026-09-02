@@ -6,6 +6,7 @@ struct ShelfView: View {
     let exportCoordinator: FileExportCoordinator
     let materializedFileStore: MaterializedFileStore
     var onDropReceived: () -> Void = {}
+    var onDropPartiallyFailed: (InboundDropResult) -> Void = { _ in }
     var onPromiseDropStarted: () -> Void = {}
     var onPromiseDropFinished: () -> Void = {}
     var onItemDragEnded: () -> Void = {}
@@ -33,13 +34,19 @@ struct ShelfView: View {
         )
     }
 
-    private func handleDrop(_ entries: [FileEntry]) {
-        guard !entries.isEmpty else { return }
-        let result = model.add(entries)
-        if result.added == 0 && result.duplicates > 0 {
+    private func handleDrop(_ result: InboundDropResult) {
+        if result.successfulEntries.isEmpty {
             ShelfFeedback.rejectedDrop()
+        } else {
+            let addResult = model.add(result.successfulEntries)
+            if addResult.added == 0 && addResult.duplicates > 0 {
+                ShelfFeedback.rejectedDrop()
+            }
+            onDropReceived()
         }
-        onDropReceived()
+        if result.partialFailureMessage != nil {
+            onDropPartiallyFailed(result)
+        }
     }
 
     private var header: some View {

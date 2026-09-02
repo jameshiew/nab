@@ -24,6 +24,7 @@ final class ShelfController {
             exportCoordinator: exportCoordinator,
             materializedFileStore: materializedFileStore,
             onDropReceived: { [weak self] in self?.handleDrop() },
+            onDropPartiallyFailed: { [weak self] in self?.presentPartialDropFailure($0) },
             onPromiseDropStarted: { [weak self] in self?.promiseDropStarted() },
             onPromiseDropFinished: { [weak self] in self?.promiseDropFinished() },
             onItemDragEnded: { [weak self] in self?.dragMonitor.endOwnDrag() },
@@ -36,6 +37,8 @@ final class ShelfController {
     private var inDrag = false
     private var pendingPromiseDropCount = 0
     private var cursorInsideShelf = false
+    private var pendingDropFailureMessages: [String] = []
+    private var isPresentingDropFailure = false
 
     private static let emptyHideDelay: Duration = .milliseconds(400)
 
@@ -100,6 +103,31 @@ final class ShelfController {
     private func promiseDropFinished() {
         pendingPromiseDropCount = max(0, pendingPromiseDropCount - 1)
         updateHideSchedule()
+    }
+
+    private func presentPartialDropFailure(_ result: InboundDropResult) {
+        guard let message = result.partialFailureMessage else { return }
+        pendingDropFailureMessages.append(message)
+        presentNextDropFailure()
+    }
+
+    private func presentNextDropFailure() {
+        guard !isPresentingDropFailure, !pendingDropFailureMessages.isEmpty else { return }
+        let message = pendingDropFailureMessages.removeFirst()
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Some Files Couldn’t Be Parked"
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        isPresentingDropFailure = true
+        NSApp.activate()
+        alert.beginSheetModal(for: panel) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.isPresentingDropFailure = false
+                self.presentNextDropFailure()
+            }
+        }
     }
 
     private func updateHideSchedule() {

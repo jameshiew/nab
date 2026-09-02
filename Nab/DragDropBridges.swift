@@ -372,13 +372,39 @@ final class FileDragSourceView: NSView, NSDraggingSource {
 
 // MARK: - Shelf drop target
 
+struct InboundDropFailure: Equatable, Sendable {
+    let errorDescription: String
+}
+
+struct InboundDropResult: Equatable {
+    let successfulEntries: [FileEntry]
+    let failures: [InboundDropFailure]
+
+    init(
+        successfulEntries: [FileEntry],
+        failures: [InboundDropFailure] = []
+    ) {
+        self.successfulEntries = successfulEntries
+        self.failures = failures
+    }
+
+    var partialFailureMessage: String? {
+        guard !successfulEntries.isEmpty, !failures.isEmpty else { return nil }
+        let successfulCount = successfulEntries.count
+        let totalCount = successfulCount + failures.count
+        let verb = successfulCount == 1 ? "was" : "were"
+        return
+            "\(successfulCount) of \(totalCount) files \(verb) parked; \(failures.count) failed."
+    }
+}
+
 /// NSView-based drop target. Reads the raw drag pasteboard so we can see
 /// `public.file-url` even when a dragged item also exposes image data — SwiftUI's
 /// `.onDrop(of:)` filters the NSItemProvider to the most specific accepted type
 /// and strips the file URL for items like PNG files from Finder.
 struct ShelfDropTarget: NSViewRepresentable {
     let materializedFileStore: MaterializedFileStore
-    let onDrop: ([FileEntry]) -> Void
+    let onDrop: (InboundDropResult) -> Void
     let onPromiseDropStarted: () -> Void
     let onPromiseDropFinished: () -> Void
 
@@ -400,7 +426,7 @@ struct ShelfDropTarget: NSViewRepresentable {
 
     final class DropView: NSView {
         var materializedFileStore: MaterializedFileStore = .shared
-        var onDrop: ([FileEntry]) -> Void = { _ in }
+        var onDrop: (InboundDropResult) -> Void = { _ in }
         var onPromiseDropStarted: () -> Void = {}
         var onPromiseDropFinished: () -> Void = {}
 
@@ -414,6 +440,7 @@ struct ShelfDropTarget: NSViewRepresentable {
             private struct ReceivedFile {
                 let fileIndex: Int?
                 let entry: FileEntry?
+                let failure: InboundDropFailure?
             }
 
             private struct ReceiverState {
@@ -450,11 +477,40 @@ struct ShelfDropTarget: NSViewRepresentable {
 
             @discardableResult
             mutating func record(
-                _ entry: FileEntry?,
+                _ entry: FileEntry,
+                fileURL: URL,
+                for receiverIndex: Int
+            ) -> Bool {
+                record(
+                    entry: entry,
+                    failure: nil,
+                    fileURL: fileURL,
+                    for: receiverIndex
+                )
+            }
+
+            @discardableResult
+            mutating func recordFailure(
+                _ failure: InboundDropFailure,
+                fileURL: URL,
+                for receiverIndex: Int
+            ) -> Bool {
+                record(
+                    entry: nil,
+                    failure: failure,
+                    fileURL: fileURL,
+                    for: receiverIndex
+                )
+            }
+
+            private mutating func record(
+                entry: FileEntry?,
+                failure: InboundDropFailure?,
                 fileURL: URL,
                 for receiverIndex: Int
             ) -> Bool {
                 precondition(receivers.indices.contains(receiverIndex))
+                precondition((entry == nil) != (failure == nil))
                 var receiver = receivers[receiverIndex]
                 let wasExpected = receiver.receivedFiles.count < receiver.expectedFileCount
                 if !wasExpected {
@@ -474,7 +530,7 @@ struct ShelfDropTarget: NSViewRepresentable {
                     fileIndex = nil
                 }
                 receiver.receivedFiles.append(
-                    ReceivedFile(fileIndex: fileIndex, entry: entry)
+                    ReceivedFile(fileIndex: fileIndex, entry: entry, failure: failure)
                 )
                 receivers[receiverIndex] = receiver
                 return wasExpected
@@ -484,8 +540,8 @@ struct ShelfDropTarget: NSViewRepresentable {
                 receivers.allSatisfy(\.isComplete)
             }
 
-            var orderedEntries: [FileEntry] {
-                receivers.flatMap { receiver in
+            var result: InboundDropResult {
+                let successfulEntries = receivers.flatMap { receiver in
                     var entries = [FileEntry?](
                         repeating: nil,
                         count: receiver.expectedFileCount
@@ -511,6 +567,13 @@ struct ShelfDropTarget: NSViewRepresentable {
                     }
                     return entries.compactMap { $0 }
                 }
+                let failures = receivers.flatMap { receiver in
+                    receiver.receivedFiles.compactMap(\.failure)
+                }
+                return InboundDropResult(
+                    successfulEntries: successfulEntries,
+                    failures: failures
+                )
             }
         }
 
@@ -523,6 +586,11 @@ struct ShelfDropTarget: NSViewRepresentable {
         struct PendingImage: Sendable {
             let data: Data
             let destinationURL: URL
+        }
+
+        struct ImageWriteResult: Equatable, Sendable {
+            let successfulURLs: [URL]
+            let failures: [InboundDropFailure]
         }
 
         private static let imageTypes: [(NSPasteboard.PasteboardType, String)] = [
@@ -603,7 +671,7 @@ struct ShelfDropTarget: NSViewRepresentable {
 
             var accepted = receiveFilePromises(receivers)
             if !entries.isEmpty {
-                onDrop(entries)
+                onDrop(InboundDropResult(successfulEntries: entries))
                 accepted = true
             }
             accepted = receiveImages(images) || accepted
@@ -639,18 +707,22 @@ struct ShelfDropTarget: NSViewRepresentable {
             guard !images.isEmpty else { return false }
 
             onPromiseDropStarted()
-            let writer = Self.imageWriter { [self] urls, errorDescriptions in
+            let writer = Self.imageWriter { [self] result in
                 defer { onPromiseDropFinished() }
-                for errorDescription in errorDescriptions {
+                for failure in result.failures {
                     Log.shelf.error(
-                        "Failed to materialize dropped image: \(errorDescription, privacy: .private)"
+                        "Failed to materialize dropped image: \(failure.errorDescription, privacy: .private)"
                     )
                 }
-                guard !urls.isEmpty else {
-                    ShelfFeedback.rejectedDrop()
-                    return
+                let entries = result.successfulURLs.map {
+                    FileEntry(url: $0, isMaterializedByNab: true)
                 }
-                onDrop(urls.map { FileEntry(url: $0, isMaterializedByNab: true) })
+                onDrop(
+                    InboundDropResult(
+                        successfulEntries: entries,
+                        failures: result.failures
+                    )
+                )
             }
             let pendingImages = images
             imageWriteQueue.addOperation {
@@ -715,11 +787,11 @@ struct ShelfDropTarget: NSViewRepresentable {
         }
 
         static nonisolated func imageWriter(
-            _ action: @escaping @MainActor @Sendable ([URL], [String]) -> Void
+            _ action: @escaping @MainActor @Sendable (ImageWriteResult) -> Void
         ) -> @Sendable ([PendingImage]) -> Void {
             { images in
                 var writtenURLs: [URL] = []
-                var errorDescriptions: [String] = []
+                var failures: [InboundDropFailure] = []
                 for image in images {
                     do {
                         try FileManager.default.createDirectory(
@@ -729,11 +801,17 @@ struct ShelfDropTarget: NSViewRepresentable {
                         try image.data.write(to: image.destinationURL, options: .atomic)
                         writtenURLs.append(image.destinationURL)
                     } catch {
-                        errorDescriptions.append(error.localizedDescription)
+                        failures.append(
+                            InboundDropFailure(errorDescription: error.localizedDescription)
+                        )
                     }
                 }
+                let result = ImageWriteResult(
+                    successfulURLs: writtenURLs,
+                    failures: failures
+                )
                 Task { @MainActor in
-                    action(writtenURLs, errorDescriptions)
+                    action(result)
                 }
             }
         }
@@ -745,28 +823,51 @@ struct ShelfDropTarget: NSViewRepresentable {
             receiverIndex: Int
         ) {
             let entry: FileEntry?
+            let failure: InboundDropFailure?
             if let error {
                 Log.shelf.error(
                     "Failed to receive promised file: \(error.localizedDescription, privacy: .private)"
                 )
                 entry = nil
+                failure = InboundDropFailure(errorDescription: error.localizedDescription)
             } else if FileManager.default.fileExists(atPath: fileURL.path) {
                 entry = FileEntry(url: fileURL, isMaterializedByNab: true)
+                failure = nil
             } else {
                 Log.shelf.error(
                     "Promised file is missing at \(fileURL.path, privacy: .private(mask: .hash))"
                 )
                 entry = nil
+                failure = InboundDropFailure(
+                    errorDescription: "The promised file was not received."
+                )
             }
 
             guard var drop = promiseDrops[dropID] else {
                 Log.shelf.fault("Received a promised-file callback after its drop finished")
                 if let entry {
-                    onDrop([entry])
+                    onDrop(InboundDropResult(successfulEntries: [entry]))
                 }
                 return
             }
-            if !drop.state.record(entry, fileURL: fileURL, for: receiverIndex) {
+            let wasExpected: Bool
+            switch (entry, failure) {
+            case (.some(let entry), nil):
+                wasExpected = drop.state.record(
+                    entry,
+                    fileURL: fileURL,
+                    for: receiverIndex
+                )
+            case (nil, .some(let failure)):
+                wasExpected = drop.state.recordFailure(
+                    failure,
+                    fileURL: fileURL,
+                    for: receiverIndex
+                )
+            default:
+                preconditionFailure("Promised-file callbacks require one result")
+            }
+            if !wasExpected {
                 Log.shelf.fault("Received more promised files than the receiver advertised")
             }
 
@@ -776,13 +877,11 @@ struct ShelfDropTarget: NSViewRepresentable {
             }
 
             promiseDrops.removeValue(forKey: dropID)
-            let entries = drop.state.orderedEntries
-            if entries.isEmpty {
+            let result = drop.state.result
+            if result.successfulEntries.isEmpty {
                 materializedFileStore.moveToTrash([drop.destinationURL])
-                ShelfFeedback.rejectedDrop()
-            } else {
-                onDrop(entries)
             }
+            onDrop(result)
             onPromiseDropFinished()
         }
 

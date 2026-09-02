@@ -174,7 +174,7 @@ final class DragDropBridgesTests: XCTestCase {
 
         XCTAssertTrue(state.isComplete)
         XCTAssertEqual(
-            state.orderedEntries.map(\.url),
+            state.result.successfulEntries.map(\.url),
             [firstURL, secondURL, thirdURL]
         )
     }
@@ -189,13 +189,15 @@ final class DragDropBridgesTests: XCTestCase {
         let failedURL = URL(fileURLWithPath: "/tmp/failed.txt")
         let keptURL = URL(fileURLWithPath: "/tmp/kept.txt")
 
-        state.record(nil, fileURL: failedURL, for: 0)
+        let failure = InboundDropFailure(errorDescription: "The first file failed.")
+        state.recordFailure(failure, fileURL: failedURL, for: 0)
         XCTAssertFalse(state.isComplete)
 
         state.record(FileEntry(url: keptURL), fileURL: keptURL, for: 0)
 
         XCTAssertTrue(state.isComplete)
-        XCTAssertEqual(state.orderedEntries.map(\.url), [keptURL])
+        XCTAssertEqual(state.result.successfulEntries.map(\.url), [keptURL])
+        XCTAssertEqual(state.result.failures, [failure])
     }
 
     func testPromiseDropFallsBackToAdvertisedFileTypeCount() {
@@ -210,32 +212,58 @@ final class DragDropBridgesTests: XCTestCase {
         state.record(FileEntry(url: secondURL), fileURL: secondURL, for: 0)
 
         XCTAssertTrue(state.isComplete)
-        XCTAssertEqual(state.orderedEntries.map(\.url), [firstURL, secondURL])
+        XCTAssertEqual(state.result.successfulEntries.map(\.url), [firstURL, secondURL])
     }
 
-    func testImageWriterWritesOffMainActorAndCompletesOnMainActor() async throws {
+    func testImageWriterReportsSuccessesAndFailuresOnMainActor() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let destinationURL = directory.appendingPathComponent("dropped.png")
+        let blockingParentURL = directory.appendingPathComponent("not-a-directory")
+        let failedDestinationURL = blockingParentURL.appendingPathComponent("failed.png")
         let contents = Data("image data".utf8)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data().write(to: blockingParentURL)
         addTeardownBlock {
             try? FileManager.default.removeItem(at: directory)
         }
         let callback = expectation(description: "image-write callback")
-        let writer = ShelfDropTarget.DropView.imageWriter { urls, errorDescriptions in
+        let writer = ShelfDropTarget.DropView.imageWriter { result in
             XCTAssertTrue(Thread.isMainThread)
-            XCTAssertEqual(urls, [destinationURL])
-            XCTAssertTrue(errorDescriptions.isEmpty)
+            XCTAssertEqual(result.successfulURLs, [destinationURL])
+            XCTAssertEqual(result.failures.count, 1)
+            XCTAssertFalse(result.failures[0].errorDescription.isEmpty)
             callback.fulfill()
         }
 
         let queue = OperationQueue()
         queue.addOperation {
             XCTAssertFalse(Thread.isMainThread)
-            writer([.init(data: contents, destinationURL: destinationURL)])
+            writer([
+                .init(data: contents, destinationURL: destinationURL),
+                .init(data: contents, destinationURL: failedDestinationURL),
+            ])
         }
 
         await fulfillment(of: [callback], timeout: 1)
         XCTAssertEqual(try Data(contentsOf: destinationURL), contents)
+    }
+
+    func testPartialDropResultBuildsConciseFailureMessage() {
+        let entries = [
+            FileEntry(url: URL(fileURLWithPath: "/tmp/first.txt")),
+            FileEntry(url: URL(fileURLWithPath: "/tmp/second.txt")),
+        ]
+        let result = InboundDropResult(
+            successfulEntries: entries,
+            failures: [InboundDropFailure(errorDescription: "Failed")]
+        )
+
+        XCTAssertEqual(result.partialFailureMessage, "2 of 3 files were parked; 1 failed.")
+        XCTAssertNil(InboundDropResult(successfulEntries: entries).partialFailureMessage)
+        XCTAssertNil(
+            InboundDropResult(successfulEntries: [], failures: result.failures)
+                .partialFailureMessage
+        )
     }
 }
