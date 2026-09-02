@@ -373,6 +373,30 @@ final class DragDropBridgesTests: XCTestCase {
         XCTAssertFalse(partialFailureReported)
     }
 
+    func testDuplicateOnlyDropRequestsRejectionAndAcknowledgesDrop() {
+        let entry = FileEntry(url: URL(fileURLWithPath: "/tmp/duplicate.txt"))
+        var addedEntries: [FileEntry] = []
+        var rejected = false
+        var dropReceived = false
+        var partialFailureReported = false
+        let handler = ShelfDropResultHandler(
+            addEntries: {
+                addedEntries = $0
+                return (added: 0, duplicates: $0.count)
+            },
+            rejectDrop: { rejected = true },
+            onDropReceived: { dropReceived = true },
+            onDropPartiallyFailed: { _ in partialFailureReported = true }
+        )
+
+        handler.handle(InboundDropResult(successfulEntries: [entry]))
+
+        XCTAssertEqual(addedEntries, [entry])
+        XCTAssertTrue(rejected)
+        XCTAssertTrue(dropReceived)
+        XCTAssertFalse(partialFailureReported)
+    }
+
     func testPromiseAccumulatorFallsBackToAdvertisedFileTypeCount() {
         var state = PromiseDropAccumulator(receiverCount: 1)
         state.configureReceiver(at: 0, fileNames: [], fileTypeCount: 2)

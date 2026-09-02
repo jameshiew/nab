@@ -17,6 +17,12 @@ build-release:
 test:
     swift test --parallel
 
+test-tsan:
+    swift test --sanitize=thread
+
+test-asan:
+    swift test --sanitize=address
+
 collect-diagnostics:
     Scripts/collect-diagnostics.sh
 

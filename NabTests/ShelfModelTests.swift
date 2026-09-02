@@ -5,6 +5,112 @@ import XCTest
 
 @MainActor
 final class ShelfModelTests: XCTestCase {
+    func testAddFiltersDuplicatesWithinDropAndAcrossShelf() throws {
+        let originalURL = try makeTemporaryFile(named: "original.txt")
+        let aliasURL = originalURL.deletingLastPathComponent()
+            .appendingPathComponent("alias.txt")
+        try FileManager.default.createSymbolicLink(at: aliasURL, withDestinationURL: originalURL)
+        let secondURL = try makeTemporaryFile(named: "second.txt")
+        let thirdURL = try makeTemporaryFile(named: "third.txt")
+        let model = ShelfModel()
+
+        let firstResult = model.add([originalURL, aliasURL, secondURL])
+        let secondResult = model.add([secondURL, thirdURL])
+
+        XCTAssertEqual(firstResult.added, 2)
+        XCTAssertEqual(firstResult.duplicates, 1)
+        XCTAssertEqual(secondResult.added, 1)
+        XCTAssertEqual(secondResult.duplicates, 1)
+        XCTAssertEqual(model.items.count, 2)
+        XCTAssertEqual(model.items[0].entries.map(\.url), [originalURL, secondURL])
+        XCTAssertEqual(model.items[0].displayName, "2 items")
+        XCTAssertEqual(model.items[1].primaryURL, thirdURL)
+        XCTAssertEqual(model.items[1].displayName, "third.txt")
+    }
+
+    func testResolveURLsPrunesMissingEntriesAndRemovesEmptyItem() throws {
+        let firstURL = try makeTemporaryFile(named: "first.txt")
+        let secondURL = try makeTemporaryFile(named: "second.txt")
+        let item = ShelfItem(entries: [FileEntry(url: firstURL), FileEntry(url: secondURL)])
+        let model = ShelfModel()
+        model.items = [item]
+        model.plainClick(item.id)
+
+        try FileManager.default.removeItem(at: firstURL)
+
+        XCTAssertEqual(model.resolveURLs(for: item.id), [secondURL])
+        XCTAssertEqual(model.items[0].entries.map(\.url), [secondURL])
+
+        try FileManager.default.removeItem(at: secondURL)
+
+        XCTAssertEqual(model.resolveURLs(for: item.id), [])
+        XCTAssertTrue(model.items.isEmpty)
+        XCTAssertTrue(model.selectedIDs.isEmpty)
+    }
+
+    func testSplitSelectedStackPreservesOrderAndSelectsEveryReplacement() {
+        let entries = ["first.txt", "second.txt", "third.txt"].map {
+            FileEntry(url: URL(fileURLWithPath: "/tmp/\($0)"))
+        }
+        let stack = ShelfItem(entries: entries)
+        let trailingItem = ShelfItem(
+            entries: [FileEntry(url: URL(fileURLWithPath: "/tmp/trailing.txt"))]
+        )
+        let model = ShelfModel()
+        model.items = [stack, trailingItem]
+        model.plainClick(stack.id)
+
+        model.split(stack.id)
+
+        XCTAssertEqual(model.items.map(\.primaryURL), entries.map(\.url) + [trailingItem.primaryURL])
+        XCTAssertEqual(model.selectedItemsInOrder().map(\.primaryURL), entries.map(\.url))
+
+        model.extendSelection(to: trailingItem.id)
+
+        XCTAssertEqual(model.selectedIDs, [trailingItem.id])
+    }
+
+    func testRangeSelectionUsesAnchorInBothDirections() {
+        let items = (0..<4).map {
+            ShelfItem(entries: [FileEntry(url: URL(fileURLWithPath: "/tmp/\($0).txt"))])
+        }
+        let model = ShelfModel()
+        model.items = items
+
+        model.extendSelection(to: items[1].id)
+        model.extendSelection(to: items[3].id)
+
+        XCTAssertEqual(model.selectedItemsInOrder().map(\.id), Array(items[1...3]).map(\.id))
+
+        model.plainClick(items[2].id)
+        model.extendSelection(to: items[0].id)
+
+        XCTAssertEqual(model.selectedItemsInOrder().map(\.id), Array(items[0...2]).map(\.id))
+    }
+
+    func testSelectionTogglesAndDragSelectionPreservesOrReplacesSelection() {
+        let items = (0..<3).map {
+            ShelfItem(entries: [FileEntry(url: URL(fileURLWithPath: "/tmp/\($0).txt"))])
+        }
+        let model = ShelfModel()
+        model.items = items
+
+        model.toggleSelection(items[0].id)
+        model.toggleSelection(items[2].id)
+        model.ensureSelectedForDrag(items[0].id)
+
+        XCTAssertEqual(model.selectedItemsInOrder().map(\.id), [items[0].id, items[2].id])
+
+        model.toggleSelection(items[0].id)
+        model.ensureSelectedForDrag(items[1].id)
+
+        XCTAssertEqual(model.selectedIDs, [items[1].id])
+
+        model.plainClick(items[1].id)
+
+        XCTAssertTrue(model.selectedIDs.isEmpty)
+    }
+
     func testAddPreservesMaterializedOwnership() throws {
         let store = try makeMaterializedFileStore()
         let materializedURL = try makeMaterializedFile(in: store)
@@ -101,6 +207,53 @@ final class ShelfModelTests: XCTestCase {
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: materializedURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: unrelatedURL.path))
+    }
+
+    func testLaunchCleanupPreservesRecentMaterializations() throws {
+        let store = try makeMaterializedFileStore()
+        let materializedURL = try makeMaterializedFile(in: store)
+
+        store.trashAbandonedMaterializations(createdBefore: .distantPast)
+        store.waitForPendingOperations()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: materializedURL.path))
+    }
+
+    func testReadLeaseDefersCleanupUntilFinished() throws {
+        let store = try makeMaterializedFileStore()
+        let materializedURL = try makeMaterializedFile(in: store)
+        let lease = try XCTUnwrap(store.beginReading(materializedURL))
+
+        store.moveToTrash([materializedURL])
+        store.waitForPendingOperations()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: materializedURL.path))
+
+        lease.finish()
+        lease.finish()
+        store.waitForPendingOperations()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: materializedURL.path))
+    }
+
+    func testReadLeaseRejectsFilesOutsideOwnedDirectories() throws {
+        let store = try makeMaterializedFileStore()
+        let userURL = try makeTemporaryFile(named: "user.txt")
+
+        XCTAssertNil(store.beginReading(userURL))
+    }
+
+    func testPromisedFileCleanupPrunesItsEmptyDirectory() throws {
+        let store = try makeMaterializedFileStore()
+        let directoryURL = try store.createPromisedFileDirectory()
+        let promisedFileURL = directoryURL.appendingPathComponent("promised.txt")
+        try Data("promised".utf8).write(to: promisedFileURL)
+
+        store.moveToTrash([promisedFileURL])
+        store.waitForPendingOperations()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: promisedFileURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directoryURL.path))
     }
 
     private func makeMaterializedFileStore() throws -> MaterializedFileStore {

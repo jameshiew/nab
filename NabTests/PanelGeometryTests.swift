@@ -4,6 +4,15 @@ import XCTest
 @testable import Nab
 
 final class PanelGeometryTests: XCTestCase {
+    func testMissingScreensLeavesFrameUnchanged() {
+        let visibleFrame = CGRect(x: 12, y: 360, width: 220, height: 360)
+
+        XCTAssertEqual(
+            PanelGeometry.frameAtNearestHorizontalEdge(for: visibleFrame, in: []),
+            visibleFrame
+        )
+    }
+
     func testSideBySideDisplaysKeepEdgeFrameOnCurrentDisplay() {
         let screens = [
             CGRect(x: 0, y: 0, width: 1_920, height: 1_080),
