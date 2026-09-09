@@ -380,6 +380,76 @@ final class DragDropBridgesTests: XCTestCase {
         )
     }
 
+    func testLegacyEmailPromiseTimeoutPreservesStableFilesAndReportsMissingEmails() throws {
+        let firstURL = try makeTemporaryFile(named: "first.eml").resolvingSymlinksInPath()
+        let directoryURL = firstURL.deletingLastPathComponent()
+        let secondURL = directoryURL.appendingPathComponent("second.eml")
+        try Data("second".utf8).write(to: secondURL)
+        var monitor = LegacyEmailPromiseMonitor(
+            expectedFileNames: ["second.eml", "missing.eml", "first.eml"],
+            fallbackExpectedFileCount: 1
+        )
+
+        XCTAssertNil(monitor.completedURLs(in: directoryURL))
+        XCTAssertNil(monitor.completedURLs(in: directoryURL))
+
+        let result = monitor.timeoutResult(in: directoryURL)
+
+        XCTAssertEqual(
+            result.successfulEntries.map { $0.url.resolvingSymlinksInPath() },
+            [secondURL, firstURL]
+        )
+        XCTAssertTrue(result.successfulEntries.allSatisfy(\.isMaterializedByNab))
+        XCTAssertEqual(result.failures.count, 1)
+        XCTAssertEqual(result.partialFailureMessage, "2 of 3 files were parked; 1 failed.")
+        XCTAssertEqual(try Data(contentsOf: firstURL), Data("file".utf8))
+        XCTAssertEqual(try Data(contentsOf: secondURL), Data("second".utf8))
+    }
+
+    func testLegacyEmailPromiseTimeoutExcludesNewAndChangingFiles() throws {
+        let stableURL = try makeTemporaryFile(named: "stable.eml").resolvingSymlinksInPath()
+        let directoryURL = stableURL.deletingLastPathComponent()
+        let changingURL = directoryURL.appendingPathComponent("changing.eml")
+        let newURL = directoryURL.appendingPathComponent("new.eml")
+        try Data("partial".utf8).write(to: changingURL)
+        var monitor = LegacyEmailPromiseMonitor(
+            expectedFileNames: ["stable.eml", "changing.eml", "new.eml"],
+            fallbackExpectedFileCount: 1
+        )
+
+        XCTAssertNil(monitor.completedURLs(in: directoryURL))
+        try Data("still writing".utf8).write(to: changingURL)
+        try Data("new".utf8).write(to: newURL)
+
+        let result = monitor.timeoutResult(in: directoryURL)
+
+        XCTAssertEqual(
+            result.successfulEntries.map { $0.url.resolvingSymlinksInPath() },
+            [stableURL]
+        )
+        XCTAssertEqual(result.failures.count, 2)
+    }
+
+    func testLegacyEmailPromiseTimeoutRejectsDirectoriesWithEmailExtensions() throws {
+        let fileURL = try makeTemporaryFile(named: "unrelated.txt")
+        let directoryURL = fileURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(
+            at: directoryURL.appendingPathComponent("message.eml", isDirectory: true),
+            withIntermediateDirectories: false
+        )
+        var monitor = LegacyEmailPromiseMonitor(
+            expectedFileNames: ["message.eml", "missing.eml"],
+            fallbackExpectedFileCount: 1
+        )
+
+        XCTAssertNil(monitor.completedURLs(in: directoryURL))
+
+        let result = monitor.timeoutResult(in: directoryURL)
+
+        XCTAssertTrue(result.successfulEntries.isEmpty)
+        XCTAssertEqual(result.failures.count, 2)
+    }
+
     func testPartiallyFailedPromiseDropRequestsVisibleFeedback() {
         var state = PromiseDropAccumulator(receiverCount: 1)
         state.configureReceiver(

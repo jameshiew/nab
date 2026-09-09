@@ -672,10 +672,10 @@ struct PromiseDropAccumulator {
 }
 
 struct LegacyEmailPromiseMonitor {
-    private struct FileState: Equatable {
+    private struct FileState: Hashable {
         let url: URL
-        let fileSize: Int?
-        let modificationDate: Date?
+        let fileSize: Int
+        let modificationDate: Date
     }
 
     let expectedFileNames: [String]
@@ -688,20 +688,42 @@ struct LegacyEmailPromiseMonitor {
     }
 
     mutating func completedURLs(in destinationURL: URL) -> [URL]? {
+        stableURLs(in: destinationURL, requireAllFiles: true)
+    }
+
+    mutating func timeoutResult(in destinationURL: URL) -> InboundDropResult {
+        let urls = stableURLs(in: destinationURL, requireAllFiles: false) ?? []
+        return InboundDropResult(
+            successfulEntries: urls.map {
+                FileEntry(url: $0, isMaterializedByNab: true)
+            },
+            failures: (0..<max(0, expectedFileCount - urls.count)).map { _ in
+                InboundDropFailure(errorDescription: "The promised email was not received.")
+            }
+        )
+    }
+
+    private mutating func stableURLs(
+        in destinationURL: URL,
+        requireAllFiles: Bool
+    ) -> [URL]? {
         let manager = FileManager.default
         guard
             let contents = try? manager.contentsOfDirectory(
                 at: destinationURL,
-                includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]
+                includingPropertiesForKeys: [
+                    .contentModificationDateKey, .fileSizeKey, .isRegularFileKey,
+                ]
             )
-        else { return nil }
+        else {
+            previousState = nil
+            return nil
+        }
 
         let emailURLs = contents.filter { url in
             guard let type = UTType(filenameExtension: url.pathExtension) else { return false }
             return type.conforms(to: .emailMessage)
         }
-        guard emailURLs.count >= expectedFileCount else { return nil }
-
         var claimedURLs: Set<URL> = []
         let expectedURLs = expectedFileNames.compactMap { name -> URL? in
             guard
@@ -718,19 +740,32 @@ struct LegacyEmailPromiseMonitor {
             .filter { !claimedURLs.contains($0) }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         let orderedURLs = expectedURLs + remainingURLs
-        let currentState = orderedURLs.map { url in
-            let values = try? url.resourceValues(forKeys: [
-                .contentModificationDateKey,
-                .fileSizeKey,
-            ])
+        let currentState = orderedURLs.compactMap { url -> FileState? in
+            guard
+                let values = try? url.resourceValues(forKeys: [
+                    .contentModificationDateKey,
+                    .fileSizeKey,
+                    .isRegularFileKey,
+                ]),
+                values.isRegularFile == true,
+                let fileSize = values.fileSize,
+                let modificationDate = values.contentModificationDate
+            else { return nil }
             return FileState(
                 url: url,
-                fileSize: values?.fileSize,
-                modificationDate: values?.contentModificationDate
+                fileSize: fileSize,
+                modificationDate: modificationDate
             )
         }
+        let previousFiles = Set(previousState ?? [])
         defer { previousState = currentState }
-        return currentState == previousState ? orderedURLs : nil
+        let stableFiles = currentState.filter { previousFiles.contains($0) }
+        if requireAllFiles {
+            guard currentState.count >= expectedFileCount,
+                stableFiles.count == currentState.count
+            else { return nil }
+        }
+        return stableFiles.map(\.url)
     }
 }
 
@@ -1006,8 +1041,11 @@ struct ShelfDropTarget: NSViewRepresentable {
                         self?.finishLegacyEmailPromiseDrop(
                             dropID: dropID,
                             destinationURL: destinationURL,
-                            urls: urls,
-                            failure: nil
+                            result: InboundDropResult(
+                                successfulEntries: urls.map {
+                                    FileEntry(url: $0, isMaterializedByNab: true)
+                                }
+                            )
                         )
                         return
                     }
@@ -1017,10 +1055,7 @@ struct ShelfDropTarget: NSViewRepresentable {
                 self?.finishLegacyEmailPromiseDrop(
                     dropID: dropID,
                     destinationURL: destinationURL,
-                    urls: [],
-                    failure: InboundDropFailure(
-                        errorDescription: "The promised email was not received."
-                    )
+                    result: monitor.timeoutResult(in: destinationURL)
                 )
             }
             return true
@@ -1029,30 +1064,21 @@ struct ShelfDropTarget: NSViewRepresentable {
         private func finishLegacyEmailPromiseDrop(
             dropID: UUID,
             destinationURL: URL,
-            urls: [URL],
-            failure: InboundDropFailure?
+            result: InboundDropResult
         ) {
             legacyEmailPromiseTasks.removeValue(forKey: dropID)
-            let failures = failure.map { [$0] } ?? []
-            if urls.isEmpty {
+            if result.successfulEntries.isEmpty {
                 materializedFileStore.moveToTrash([destinationURL])
             }
             DiagnosticsRecorder.shared.record(
                 "drop_legacy_email_promise_delivery_started",
                 details: [
                     "drop_id": dropID.uuidString.lowercased(),
-                    "failure_count": String(failures.count),
-                    "success_count": String(urls.count),
+                    "failure_count": String(result.failures.count),
+                    "success_count": String(result.successfulEntries.count),
                 ]
             )
-            onDrop(
-                InboundDropResult(
-                    successfulEntries: urls.map {
-                        FileEntry(url: $0, isMaterializedByNab: true)
-                    },
-                    failures: failures
-                )
-            )
+            onDrop(result)
             onPromiseDropFinished()
         }
 
