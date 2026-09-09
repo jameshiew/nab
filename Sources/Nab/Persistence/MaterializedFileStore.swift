@@ -83,8 +83,9 @@ nonisolated final class MaterializedFileStore: @unchecked Sendable {
     func beginReading(_ url: URL) -> ReadLease? {
         guard let ownedURL = ownedURL(for: url) else { return nil }
         stateLock.lock()
+        defer { stateLock.unlock() }
+        guard FileManager.default.fileExists(atPath: ownedURL.path) else { return nil }
         readCounts[ownedURL, default: 0] += 1
-        stateLock.unlock()
         return ReadLease(store: self, url: ownedURL)
     }
 
@@ -114,19 +115,23 @@ nonisolated final class MaterializedFileStore: @unchecked Sendable {
     }
 
     private func endReading(_ url: URL) {
-        var shouldSchedule = false
+        var urlsToSchedule: [URL] = []
         stateLock.lock()
         if let count = readCounts[url], count > 1 {
             readCounts[url] = count - 1
         } else {
             readCounts.removeValue(forKey: url)
-            if pendingURLs.contains(url), scheduledURLs.insert(url).inserted {
-                shouldSchedule = true
+            for pendingURL in pendingURLs {
+                if !hasActiveReaders(overlapping: pendingURL),
+                    scheduledURLs.insert(pendingURL).inserted
+                {
+                    urlsToSchedule.append(pendingURL)
+                }
             }
         }
         stateLock.unlock()
-        if shouldSchedule {
-            scheduleCleanup(of: url)
+        for pendingURL in urlsToSchedule {
+            scheduleCleanup(of: pendingURL)
         }
     }
 
@@ -136,7 +141,7 @@ nonisolated final class MaterializedFileStore: @unchecked Sendable {
         var shouldSchedule = false
         stateLock.lock()
         pendingURLs.insert(ownedURL)
-        if readCounts[ownedURL] == nil, scheduledURLs.insert(ownedURL).inserted {
+        if !hasActiveReaders(overlapping: ownedURL), scheduledURLs.insert(ownedURL).inserted {
             shouldSchedule = true
         }
         stateLock.unlock()
@@ -154,13 +159,11 @@ nonisolated final class MaterializedFileStore: @unchecked Sendable {
 
     private func performScheduledCleanup(of url: URL) {
         stateLock.lock()
-        guard readCounts[url] == nil, pendingURLs.remove(url) != nil else {
-            scheduledURLs.remove(url)
-            stateLock.unlock()
+        defer { stateLock.unlock() }
+        scheduledURLs.remove(url)
+        guard !hasActiveReaders(overlapping: url), pendingURLs.remove(url) != nil else {
             return
         }
-        scheduledURLs.remove(url)
-        stateLock.unlock()
 
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         do {
@@ -170,6 +173,16 @@ nonisolated final class MaterializedFileStore: @unchecked Sendable {
             logger.error(
                 "Failed to clean up \(url.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private)"
             )
+        }
+    }
+
+    private func hasActiveReaders(overlapping url: URL) -> Bool {
+        let path = url.path
+        return readCounts.keys.contains { readingURL in
+            let readingPath = readingURL.path
+            return readingPath == path
+                || readingPath.hasPrefix(path + "/")
+                || path.hasPrefix(readingPath + "/")
         }
     }
 
@@ -235,7 +248,7 @@ nonisolated final class MaterializedFileStore: @unchecked Sendable {
             .appendingPathComponent(String(firstComponent), isDirectory: true)
         guard FileManager.default.fileExists(atPath: directoryURL.path) else { return }
         let contents = try FileManager.default.contentsOfDirectory(atPath: directoryURL.path)
-        if contents.isEmpty {
+        if contents.isEmpty, !hasActiveReaders(overlapping: directoryURL) {
             try trashItem(directoryURL)
         }
     }
