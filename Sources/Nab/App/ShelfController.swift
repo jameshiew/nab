@@ -27,7 +27,7 @@ final class ShelfController {
             onDropPartiallyFailed: { [weak self] in self?.presentPartialDropFailure($0) },
             onPromiseDropStarted: { [weak self] in self?.promiseDropStarted() },
             onPromiseDropFinished: { [weak self] in self?.promiseDropFinished() },
-            onItemDragEnded: { [weak self] in self?.dragMonitor.endOwnDrag() },
+            onItemDragEnded: { [weak self] in self?.dragMonitor.endDrag() },
             onHeaderDragEnded: { [weak self] in self?.panel.userDidFinishDragging() }
         )
         return ShelfPanel(rootView: view)

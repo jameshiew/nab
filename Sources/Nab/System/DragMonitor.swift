@@ -1,20 +1,16 @@
 import AppKit
 import CoreGraphics
 
-/// Watches for system-wide drag-and-drop sessions.
-/// Posts `dragStarted` once per drag, then `dragEnded` on mouse up.
 final class DragMonitor {
     var dragStarted: () -> Void = {}
     var dragEnded: () -> Void = {}
     var dragMoved: (NSPoint) -> Void = { _ in }
 
     private let isDragSessionActive: @MainActor () -> Bool
-    private var dragMonitor: Any?
-    private var upMonitor: Any?
+    private var pollTimer: Timer?
     private var inDrag = false
-    private var lastPoll: TimeInterval = 0
 
-    private static let pollInterval: TimeInterval = 0.03
+    private static let pollInterval: TimeInterval = 0.05
 
     init(
         isDragSessionActive: @escaping @MainActor () -> Bool = DragMonitor.hasActiveDragWindow
@@ -24,62 +20,47 @@ final class DragMonitor {
 
     deinit {
         MainActor.assumeIsolated {
-            if let m = dragMonitor { NSEvent.removeMonitor(m) }
-            if let m = upMonitor { NSEvent.removeMonitor(m) }
+            pollTimer?.invalidate()
         }
     }
 
     func start() {
-        guard dragMonitor == nil, upMonitor == nil else { return }
-        dragMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged]) { [weak self] _ in
-            self?.handleDrag(
-                at: NSEvent.mouseLocation,
-                now: ProcessInfo.processInfo.systemUptime
-            )
+        guard pollTimer == nil else { return }
+        let timer = Timer(timeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.poll(at: NSEvent.mouseLocation)
+            }
         }
-        upMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
-            self?.handleMouseUp()
-        }
+        timer.tolerance = 0.01
+        pollTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     func stop() {
-        if let m = dragMonitor { NSEvent.removeMonitor(m) }
-        if let m = upMonitor { NSEvent.removeMonitor(m) }
-        dragMonitor = nil
-        upMonitor = nil
+        pollTimer?.invalidate()
+        pollTimer = nil
         inDrag = false
-        lastPoll = 0
     }
 
-    func endOwnDrag() {
+    func endDrag() {
         let wasInDrag = inDrag
         inDrag = false
-        lastPoll = 0
         if wasInDrag {
             dragEnded()
         }
     }
 
-    func handleDrag(at point: NSPoint, now: TimeInterval) {
-        if inDrag {
-            dragMoved(point)
+    func poll(at point: NSPoint) {
+        guard isDragSessionActive() else {
+            endDrag()
             return
         }
 
-        guard now - lastPoll >= Self.pollInterval else { return }
-        lastPoll = now
-        guard isDragSessionActive() else { return }
-
-        inDrag = true
-        dragStarted()
+        if !inDrag {
+            inDrag = true
+            dragStarted()
+        }
         dragMoved(point)
-    }
-
-    func handleMouseUp() {
-        lastPoll = 0
-        guard inDrag else { return }
-        inDrag = false
-        dragEnded()
     }
 
     private static func hasActiveDragWindow() -> Bool {
@@ -90,8 +71,14 @@ final class DragMonitor {
             ) as? [[String: Any]]
         else { return false }
 
-        return windows.contains {
+        return hasActiveDragWindow(in: windows, excludingProcessID: ProcessInfo.processInfo.processIdentifier)
+    }
+
+    static func hasActiveDragWindow(in windows: [[String: Any]], excludingProcessID processID: Int32) -> Bool {
+        windows.contains {
             ($0[kCGWindowLayer as String] as? Int) == Int(kCGDraggingWindowLevel)
+                && ($0[kCGWindowOwnerPID as String] as? Int32) != processID
+                && ($0[kCGWindowAlpha as String] as? Double ?? 1) > 0
         }
     }
 }
