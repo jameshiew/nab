@@ -48,6 +48,39 @@ final class ShelfModelTests: XCTestCase {
         XCTAssertTrue(model.selectedIDs.isEmpty)
     }
 
+    func testAddRejectsDuplicateAfterParkedFileIsRenamed() throws {
+        let originalURL = try makeTemporaryFile(named: "original.txt")
+        let renamedURL = originalURL.deletingLastPathComponent()
+            .appendingPathComponent("renamed.txt")
+        let model = ShelfModel()
+        model.add([originalURL])
+        XCTAssertNotNil(model.items[0].entries[0].bookmarkData)
+        try FileManager.default.moveItem(at: originalURL, to: renamedURL)
+
+        let result = model.add([renamedURL])
+
+        XCTAssertEqual(result.added, 0)
+        XCTAssertEqual(result.duplicates, 1)
+        XCTAssertEqual(model.items.map(\.primaryURL), [renamedURL])
+    }
+
+    func testAddAcceptsReplacementAtRenamedFilesOriginalPath() throws {
+        let originalURL = try makeTemporaryFile(named: "original.txt")
+        let renamedURL = originalURL.deletingLastPathComponent()
+            .appendingPathComponent("renamed.txt")
+        let model = ShelfModel()
+        model.add([originalURL])
+        XCTAssertNotNil(model.items[0].entries[0].bookmarkData)
+        try FileManager.default.moveItem(at: originalURL, to: renamedURL)
+        try Data("replacement".utf8).write(to: originalURL)
+
+        let result = model.add([originalURL])
+
+        XCTAssertEqual(result.added, 1)
+        XCTAssertEqual(result.duplicates, 0)
+        XCTAssertEqual(model.items.map(\.primaryURL), [renamedURL, originalURL])
+    }
+
     func testSplitSelectedStackPreservesOrderAndSelectsEveryReplacement() {
         let entries = ["first.txt", "second.txt", "third.txt"].map {
             FileEntry(url: URL(fileURLWithPath: "/tmp/\($0)"))

@@ -5,6 +5,7 @@ struct FileEntry: Hashable {
     var url: URL
     var bookmarkData: Data? = nil
     var isMaterializedByNab = false
+    var fileReferenceURL: NSURL? = nil
 }
 
 struct ShelfItem: Identifiable, Hashable {
@@ -45,7 +46,10 @@ final class ShelfModel {
 
     @discardableResult
     func add(_ candidates: [FileEntry]) -> (added: Int, duplicates: Int) {
-        var existing = Set(items.flatMap { $0.entries.map { Self.duplicateKey(for: $0.url) } })
+        var existing: Set<URL> = []
+        for id in items.map(\.id) {
+            existing.formUnion(resolveURLs(for: id).map { Self.duplicateKey(for: $0) })
+        }
         var entries: [FileEntry] = []
         var duplicates = 0
         for candidate in candidates {
@@ -55,6 +59,7 @@ final class ShelfModel {
                 var entry = candidate
                 entry.url = fileURL
                 entry.bookmarkData = Self.bookmarkData(for: fileURL)
+                entry.fileReferenceURL = (fileURL as NSURL).fileReferenceURL() as NSURL?
                 entries.append(entry)
             } else {
                 duplicates += 1
@@ -186,6 +191,16 @@ final class ShelfModel {
     }
 
     private static func resolvedEntry(for entry: FileEntry) -> FileEntry? {
+        if let fileURL = entry.fileReferenceURL?.filePathURL?.standardizedFileURL,
+            FileManager.default.fileExists(atPath: fileURL.path)
+        {
+            var updated = entry
+            updated.url = fileURL
+            if entry.url != fileURL {
+                updated.bookmarkData = bookmarkData(for: fileURL)
+            }
+            return updated
+        }
         if let resolved = resolvedBookmarkEntry(for: entry) {
             return resolved
         }
@@ -198,6 +213,7 @@ final class ShelfModel {
         var updated = entry
         updated.url = fallbackURL
         updated.bookmarkData = bookmarkData(for: fallbackURL)
+        updated.fileReferenceURL = (fallbackURL as NSURL).fileReferenceURL() as NSURL?
         return updated
     }
 
@@ -223,6 +239,7 @@ final class ShelfModel {
 
         var updated = entry
         updated.url = fileURL
+        updated.fileReferenceURL = (fileURL as NSURL).fileReferenceURL() as NSURL?
         if isStale {
             updated.bookmarkData = bookmarkData(for: fileURL)
         }
