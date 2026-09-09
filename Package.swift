@@ -16,7 +16,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "Nab",
-            path: "Nab",
+            exclude: ["Resources"],
             swiftSettings: [
                 .defaultIsolation(MainActor.self)
             ] + approachableConcurrency
@@ -24,7 +24,6 @@ let package = Package(
         .testTarget(
             name: "NabTests",
             dependencies: ["Nab"],
-            path: "NabTests",
             swiftSettings: approachableConcurrency
         ),
     ],

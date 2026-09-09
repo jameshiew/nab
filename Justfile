@@ -2,6 +2,8 @@ app_name := "Nab"
 debug_app_path := "build/debug/Nab.app"
 release_app_path := "build/release/Nab.app"
 
+default: verify
+
 run-debug: build-debug
     open {{ debug_app_path }}
 
@@ -9,10 +11,10 @@ run-debug-attached: build-debug
     "{{ debug_app_path }}/Contents/MacOS/Nab"
 
 build-debug:
-    Scripts/build-app.sh debug
+    swift scripts/bundle-app.swift debug
 
 build-release:
-    Scripts/build-app.sh release
+    swift scripts/bundle-app.swift release
 
 test:
     swift test --parallel
@@ -24,11 +26,11 @@ test-asan:
     swift test --sanitize=address
 
 collect-diagnostics:
-    Scripts/collect-diagnostics.sh
+    scripts/collect-diagnostics.sh
 
 verify: lint test build-debug
 
-run:
+run: build-debug
     open {{ debug_app_path }}
 
 run-release: build-release
@@ -39,13 +41,13 @@ install: build-release
     rsync --archive --delete --extended-attributes "{{ release_app_path }}/" "$HOME/Applications/{{ app_name }}.app/"
 
 icon:
-    swift Scripts/generate-app-icon.swift
+    swift scripts/generate-app-icon.swift
 
 fmt:
-    swift format --in-place --recursive Package.swift Nab/ NabTests/ Scripts/
+    swift format --in-place --recursive Package.swift Sources/ Tests/ scripts/
 
 lint:
-    swift format lint --strict --recursive Package.swift Nab/ NabTests/ Scripts/
+    swift format lint --strict --recursive Package.swift Sources/ Tests/ scripts/
 
 clean:
     swift package clean

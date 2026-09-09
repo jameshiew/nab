@@ -4,8 +4,7 @@
 // blue squircle. Drawn with Core Graphics so the icon lives in the repo as
 // code rather than as an opaque binary asset.
 //
-// Usage: Scripts/generate-app-icon.swift [output-iconset-directory]
-// Defaults to Resources/AppIcon.iconset.
+// Usage: swift scripts/generate-app-icon.swift [output-iconset-directory]
 
 import AppKit
 import CoreGraphics
@@ -235,11 +234,13 @@ private func filename(points: Int, scale: Int) -> String {
     "icon_\(points)x\(points)\(scale == 1 ? "" : "@\(scale)x").png"
 }
 
-let outputDirectory = URL(
-    fileURLWithPath: CommandLine.arguments.count > 1
-        ? CommandLine.arguments[1]
-        : "Resources/AppIcon.iconset"
-)
+let outputDirectory =
+    CommandLine.arguments.count > 1
+    ? URL(filePath: CommandLine.arguments[1])
+    : URL(filePath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appending(path: "Sources/Nab/Resources/AppIcon.iconset")
 try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
 for variant in variants {
