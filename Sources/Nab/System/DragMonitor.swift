@@ -6,6 +6,7 @@ final class DragMonitor {
     var dragEnded: () -> Void = {}
     var dragMoved: (NSPoint) -> Void = { _ in }
 
+    private let isPrimaryButtonPressed: @MainActor () -> Bool
     private let isDragSessionActive: @MainActor () -> Bool
     private var pollTimer: Timer?
     private var inDrag = false
@@ -13,8 +14,10 @@ final class DragMonitor {
     private static let pollInterval: TimeInterval = 0.05
 
     init(
+        isPrimaryButtonPressed: @escaping @MainActor () -> Bool = DragMonitor.primaryButtonIsPressed,
         isDragSessionActive: @escaping @MainActor () -> Bool = DragMonitor.hasActiveDragWindow
     ) {
+        self.isPrimaryButtonPressed = isPrimaryButtonPressed
         self.isDragSessionActive = isDragSessionActive
     }
 
@@ -50,8 +53,10 @@ final class DragMonitor {
         }
     }
 
+    /// A drag session cannot outlive the primary mouse button, so the
+    /// comparatively expensive window-list query only runs while it is held.
     func poll(at point: NSPoint) {
-        guard isDragSessionActive() else {
+        guard isPrimaryButtonPressed(), isDragSessionActive() else {
             endDrag()
             return
         }
@@ -61,6 +66,10 @@ final class DragMonitor {
             dragStarted()
         }
         dragMoved(point)
+    }
+
+    private static func primaryButtonIsPressed() -> Bool {
+        NSEvent.pressedMouseButtons & 1 != 0
     }
 
     private static func hasActiveDragWindow() -> Bool {
