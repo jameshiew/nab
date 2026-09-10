@@ -1,13 +1,14 @@
 app_name := "Nab"
+bundle_id := "net.hiew.Nab"
 debug_app_path := "build/debug/Nab.app"
 release_app_path := "build/release/Nab.app"
 
 default: verify
 
-run-debug: build-debug
+run-debug: build-debug quit
     open {{ debug_app_path }}
 
-run-debug-attached: build-debug
+run-debug-attached: build-debug quit
     "{{ debug_app_path }}/Contents/MacOS/Nab"
 
 build-debug:
@@ -25,15 +26,19 @@ test-tsan:
 test-asan:
     swift test --sanitize=address
 
+quit:
+    if pgrep -xq {{ app_name }}; then osascript -e 'tell application id "{{ bundle_id }}" to quit'; fi
+    for _ in $(seq 1 50); do pgrep -xq {{ app_name }} || break; sleep 0.1; done
+
 collect-diagnostics:
     scripts/collect-diagnostics.sh
 
 verify: lint test build-debug
 
-run: build-debug
+run: build-debug quit
     open {{ debug_app_path }}
 
-run-release: build-release
+run-release: build-release quit
     open {{ release_app_path }}
 
 install: build-release
