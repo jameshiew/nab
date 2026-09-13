@@ -1,5 +1,5 @@
 app_name := "Nab"
-bundle_id := "net.hiew.Nab"
+bundle_id := `/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' Sources/Nab/Resources/Info.plist`
 debug_app_path := "build/debug/Nab.app"
 release_app_path := "build/release/Nab.app"
 

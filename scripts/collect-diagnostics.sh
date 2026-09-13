@@ -4,6 +4,7 @@ set -eu
 
 script_directory="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 project_directory="$(dirname -- "$script_directory")"
+bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$project_directory/Sources/Nab/Resources/Info.plist")"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 output_directory="$project_directory/build/diagnostics/$timestamp"
 user_library_directory="${HOME}/Library"
@@ -34,7 +35,7 @@ if ! /usr/bin/log show \
     --last 24h \
     --info \
     --debug \
-    --predicate 'subsystem == "dev.nab.Nab"' \
+    --predicate "subsystem == \"$bundle_identifier\"" \
     > "$output_directory/unified-log.jsonl" \
     2> "$output_directory/unified-log-error.txt"
 then

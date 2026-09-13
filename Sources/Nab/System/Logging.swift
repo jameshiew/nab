@@ -2,7 +2,7 @@ import AppKit
 import os
 
 enum Log {
-    static let shelf = Logger(subsystem: "dev.nab.Nab", category: "Shelf")
+    static let shelf = Logger(subsystem: AppIdentity.bundleIdentifier, category: "Shelf")
 }
 
 enum ShelfFeedback {

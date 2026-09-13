@@ -825,7 +825,7 @@ struct ShelfDropTarget: NSViewRepresentable {
         }()
         private let imageWriteQueue: OperationQueue = {
             let queue = OperationQueue()
-            queue.name = "dev.nab.dropped-image-write"
+            queue.name = AppIdentity.namespaced("dropped-image-write")
             queue.qualityOfService = .userInitiated
             queue.maxConcurrentOperationCount = 1
             return queue

@@ -35,7 +35,7 @@ nonisolated final class MaterializedFileStore: @unchecked Sendable {
     private let trashItem: @Sendable (URL) throws -> Void
     private let cleanupQueue: OperationQueue = {
         let queue = OperationQueue()
-        queue.name = "dev.nab.materialized-file-cleanup"
+        queue.name = AppIdentity.namespaced("materialized-file-cleanup")
         queue.qualityOfService = .utility
         queue.maxConcurrentOperationCount = 1
         return queue
@@ -44,7 +44,7 @@ nonisolated final class MaterializedFileStore: @unchecked Sendable {
     private var readCounts: [URL: Int] = [:]
     private var pendingURLs: Set<URL> = []
     private var scheduledURLs: Set<URL> = []
-    private let logger = Logger(subsystem: "dev.nab.Nab", category: "Storage")
+    private let logger = Logger(subsystem: AppIdentity.bundleIdentifier, category: "Storage")
 
     init(
         applicationSupportURL: URL = MaterializedFileStore.defaultApplicationSupportURL(),

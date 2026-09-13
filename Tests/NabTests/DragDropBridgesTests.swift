@@ -162,7 +162,7 @@ final class DragDropBridgesTests: XCTestCase {
         let promise = NSFilePromiseProvider(fileType: "public.plain-text", delegate: promiseDelegate)
         let image = NSPasteboardItem()
         image.setData(Data("image".utf8), forType: .png)
-        let pasteboard = NSPasteboard(name: .init("dev.nab.tests.\(UUID().uuidString)"))
+        let pasteboard = NSPasteboard(name: .init(AppIdentity.namespaced("tests.\(UUID().uuidString)")))
         pasteboard.clearContents()
         let writers: [NSPasteboardWriting] = [promise, fileURL as NSURL, image]
         pasteboard.writeObjects(writers)
@@ -194,7 +194,7 @@ final class DragDropBridgesTests: XCTestCase {
         let item = NSPasteboardItem()
         item.setString(fileURL.absoluteString, forType: .fileURL)
         item.setData(Data("image".utf8), forType: .png)
-        let pasteboard = NSPasteboard(name: .init("dev.nab.tests.\(UUID().uuidString)"))
+        let pasteboard = NSPasteboard(name: .init(AppIdentity.namespaced("tests.\(UUID().uuidString)")))
         pasteboard.clearContents()
         pasteboard.writeObjects([item])
 
@@ -619,7 +619,7 @@ final class DragDropBridgesTests: XCTestCase {
     }
 
     private func makePasteboard(with writers: [NSPasteboardWriting]) -> NSPasteboard {
-        let pasteboard = NSPasteboard(name: .init("dev.nab.tests.\(UUID().uuidString)"))
+        let pasteboard = NSPasteboard(name: .init(AppIdentity.namespaced("tests.\(UUID().uuidString)")))
         pasteboard.clearContents()
         XCTAssertTrue(pasteboard.writeObjects(writers))
         return pasteboard

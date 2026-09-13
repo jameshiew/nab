@@ -20,7 +20,7 @@ final class DiagnosticsRecorder {
     private let sessionID: UUID
     private let now: () -> Date
     private let fileManager: FileManager
-    private let logger = Logger(subsystem: "dev.nab.Nab", category: "Diagnostics")
+    private let logger = Logger(subsystem: AppIdentity.bundleIdentifier, category: "Diagnostics")
     private var started = false
 
     init(
