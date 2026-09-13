@@ -5,7 +5,7 @@ import XCTest
 @testable import Nab
 
 @MainActor
-final class DragDropBridgesTests: XCTestCase {
+final class DragDropTests: XCTestCase {
     private final class LegacyPromiseSource: NSObject {
         var receivedDestinationURL: URL?
 
