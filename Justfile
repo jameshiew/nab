@@ -3,6 +3,7 @@ bundle_id := `/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' Sources/Nab/
 debug_app_path := "build/debug/Nab.app"
 release_app_path := "build/release/Nab.app"
 test_results := "build/test-results.xml"
+script := "swift run --quiet --package-path scripts"
 
 default: verify
 
@@ -13,10 +14,10 @@ run-debug-attached: build-debug quit
     "{{ debug_app_path }}/Contents/MacOS/Nab"
 
 build-debug:
-    swift scripts/bundle-app.swift debug
+    {{ script }} bundle-app debug
 
 build-release:
-    swift scripts/bundle-app.swift release
+    {{ script }} bundle-app release
 
 test:
     #!/bin/sh
@@ -28,7 +29,7 @@ test:
     else
         status=$?
     fi
-    swift scripts/summarize-tests.swift "{{ test_results }}" || exit 1
+    {{ script }} summarize-tests "{{ test_results }}" || exit 1
     exit "$status"
 
 test-tsan:
@@ -42,7 +43,7 @@ quit:
     for _ in $(seq 1 50); do pgrep -xq {{ app_name }} || break; sleep 0.1; done
 
 collect-diagnostics:
-    swift scripts/collect-diagnostics.swift
+    {{ script }} collect-diagnostics
 
 verify: lint test build-debug
     @echo "verify passed: lint, test, build-debug"
@@ -58,7 +59,7 @@ install: build-release
     rsync --archive --delete --extended-attributes "{{ release_app_path }}/" "$HOME/Applications/{{ app_name }}.app/"
 
 icon:
-    swift scripts/generate-app-icon.swift
+    {{ script }} generate-app-icon
 
 fmt:
     swift format --in-place --recursive Package.swift Sources/ Tests/ scripts/
@@ -68,4 +69,5 @@ lint:
 
 clean:
     swift package clean
+    swift package --package-path scripts clean
     if test -d build; then trash build; fi

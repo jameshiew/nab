@@ -1,14 +1,11 @@
-#!/usr/bin/env swift
-
 // Generates the Nab app icon: a tray glyph, echoing the menu bar icon, on a
 // blue squircle. Drawn with Core Graphics so the icon lives in the repo as
 // code rather than as an opaque binary asset.
-//
-// Usage: swift scripts/generate-app-icon.swift [output-iconset-directory]
 
 import AppKit
 import CoreGraphics
 import Foundation
+import ScriptSupport
 import SwiftUI
 
 // MARK: - Geometry
@@ -237,10 +234,7 @@ private func filename(points: Int, scale: Int) -> String {
 let outputDirectory =
     CommandLine.arguments.count > 1
     ? URL(filePath: CommandLine.arguments[1])
-    : URL(filePath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .appending(path: "Sources/Nab/Resources/AppIcon.iconset")
+    : projectRoot.appending(path: "Sources/Nab/Resources/AppIcon.iconset")
 try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
 for variant in variants {

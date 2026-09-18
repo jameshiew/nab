@@ -1,10 +1,8 @@
 // Summarizes the xUnit report left behind by `swift test --xunit-output`, so a
 // run ends with a count and the names of whatever failed.
-//
-// Usage: swift scripts/summarize-tests.swift <results-file>
 
-import Darwin
 import Foundation
+import ScriptSupport
 
 enum SummaryError: LocalizedError {
     case usage
@@ -14,7 +12,7 @@ enum SummaryError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .usage:
-            "Usage: summarize-tests.swift <results-file>"
+            "Usage: summarize-tests <results-file>"
         case .missingResults(let url):
             "No test results were written to \(url.path)"
         case .malformedResults(let url):
@@ -70,6 +68,5 @@ do {
     }
     print("Tests: \(summary.tests) run, \(summary.failures) failed, \(summary.errors) errors")
 } catch {
-    FileHandle.standardError.write(Data("error: \(error.localizedDescription)\n".utf8))
-    exit(EXIT_FAILURE)
+    fail(error)
 }

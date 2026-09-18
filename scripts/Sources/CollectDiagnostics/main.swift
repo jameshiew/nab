@@ -2,63 +2,20 @@
 // and repository identity, Nab's event journal, its unified log, crash reports,
 // and the Debug build's binary identity and symbols. Run before rebuilding,
 // since a rebuild destroys the symbols the crash reports point at.
-//
-// Usage: swift scripts/collect-diagnostics.swift
 
 import CryptoKit
-import Darwin
 import Foundation
+import ScriptSupport
 
 enum DiagnosticsError: LocalizedError {
     case missingBundleIdentifier(URL)
-    case commandFailed(String, Int32)
 
     var errorDescription: String? {
         switch self {
         case .missingBundleIdentifier(let url):
             "No CFBundleIdentifier in \(url.path)"
-        case .commandFailed(let command, let status):
-            "\(command) failed with exit status \(status)"
         }
     }
-}
-
-func capture(_ executable: String, _ arguments: [String]) throws -> String {
-    let process = Process()
-    let output = Pipe()
-    process.executableURL = URL(filePath: executable)
-    process.arguments = arguments
-    process.standardOutput = output
-
-    try process.run()
-    let data = output.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-
-    guard process.terminationStatus == EXIT_SUCCESS else {
-        let command = ([executable] + arguments).joined(separator: " ")
-        throw DiagnosticsError.commandFailed(command, process.terminationStatus)
-    }
-
-    return String(decoding: data, as: UTF8.self)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-}
-
-/// Runs a command straight into two files, tolerating failure. The unified log
-/// is best effort — it goes quiet once a machine has rotated past the window —
-/// and its complaints are worth keeping either way.
-func redirect(_ executable: String, _ arguments: [String], output: URL, errorOutput: URL) throws {
-    let fileManager = FileManager.default
-    fileManager.createFile(atPath: output.path, contents: nil)
-    fileManager.createFile(atPath: errorOutput.path, contents: nil)
-
-    let process = Process()
-    process.executableURL = URL(filePath: executable)
-    process.arguments = arguments
-    process.standardOutput = try FileHandle(forWritingTo: output)
-    process.standardError = try FileHandle(forWritingTo: errorOutput)
-
-    try process.run()
-    process.waitUntilExit()
 }
 
 func write(_ sections: [String], to url: URL) throws {
@@ -91,9 +48,7 @@ func recentFiles(in directory: URL) -> [URL] {
 
 func collectDiagnostics() throws -> URL {
     let fileManager = FileManager.default
-    let projectDirectory = URL(filePath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
+    let projectDirectory = projectRoot
 
     let infoPlist = projectDirectory.appending(path: "Sources/Nab/Resources/Info.plist")
     let information = try PropertyListSerialization.propertyList(from: Data(contentsOf: infoPlist), format: nil)
@@ -114,9 +69,9 @@ func collectDiagnostics() throws -> URL {
 
     try write(
         [
-            try capture("/usr/bin/sw_vers", []),
-            try capture("/usr/bin/uname", ["-a"]),
-            try capture("/usr/bin/arch", []),
+            try run("/usr/bin/sw_vers", [], capturingOutput: true),
+            try run("/usr/bin/uname", ["-a"], capturingOutput: true),
+            try run("/usr/bin/arch", [], capturingOutput: true),
         ],
         to: outputDirectory.appending(path: "system.txt")
     )
@@ -124,8 +79,8 @@ func collectDiagnostics() throws -> URL {
     let git = "/usr/bin/git"
     try write(
         [
-            try capture(git, ["-C", projectDirectory.path, "rev-parse", "HEAD"]),
-            try capture(git, ["-C", projectDirectory.path, "status", "--short", "--branch"]),
+            try run(git, ["-C", projectDirectory.path, "rev-parse", "HEAD"], capturingOutput: true),
+            try run(git, ["-C", projectDirectory.path, "status", "--short", "--branch"], capturingOutput: true),
         ],
         to: outputDirectory.appending(path: "repository.txt")
     )
@@ -162,7 +117,7 @@ func collectDiagnostics() throws -> URL {
         let checksum = digest.map { String(format: "%02x", $0) }.joined()
         try write(
             [
-                try capture("/usr/bin/xcrun", ["dwarfdump", "--uuid", executable.path]),
+                try run("/usr/bin/xcrun", ["dwarfdump", "--uuid", executable.path], capturingOutput: true),
                 "\(checksum)  \(executable.path)",
             ],
             to: outputDirectory.appending(path: "debug-binary.txt")
@@ -182,6 +137,5 @@ func collectDiagnostics() throws -> URL {
 do {
     print(try collectDiagnostics().path)
 } catch {
-    FileHandle.standardError.write(Data("error: \(error.localizedDescription)\n".utf8))
-    exit(EXIT_FAILURE)
+    fail(error)
 }

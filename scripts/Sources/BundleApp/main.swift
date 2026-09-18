@@ -1,10 +1,9 @@
-import Darwin
 import Foundation
+import ScriptSupport
 
 enum BundleError: LocalizedError {
     case invalidConfiguration(String)
     case missingExecutable(URL)
-    case commandFailed(String, Int32)
 
     var errorDescription: String? {
         switch self {
@@ -12,8 +11,6 @@ enum BundleError: LocalizedError {
             "Unknown build configuration: \(value)"
         case .missingExecutable(let url):
             "SwiftPM did not produce an executable at \(url.path)"
-        case .commandFailed(let command, let status):
-            "\(command) failed with exit status \(status)"
         }
     }
 }
@@ -23,52 +20,20 @@ enum BuildConfiguration: String {
     case release
 }
 
-@discardableResult
-func run(
-    _ executable: String,
-    arguments: [String],
-    in directory: URL,
-    captureOutput: Bool = false
-) throws -> String {
-    let process = Process()
-    let output = Pipe()
-    process.executableURL = URL(filePath: executable)
-    process.arguments = arguments
-    process.currentDirectoryURL = directory
-    if captureOutput {
-        process.standardOutput = output
-    }
-
-    try process.run()
-    let data = captureOutput ? output.fileHandleForReading.readDataToEndOfFile() : Data()
-    process.waitUntilExit()
-
-    guard process.terminationStatus == EXIT_SUCCESS else {
-        let command = ([executable] + arguments).joined(separator: " ")
-        throw BundleError.commandFailed(command, process.terminationStatus)
-    }
-
-    return String(decoding: data, as: UTF8.self)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-}
-
 func bundleApplication(configuration: BuildConfiguration) throws -> URL {
     let fileManager = FileManager.default
-    let packageRoot = URL(filePath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
     let swift = "/usr/bin/swift"
 
     try run(
         swift,
-        arguments: ["build", "--configuration", configuration.rawValue, "--product", "Nab"],
-        in: packageRoot
+        ["build", "--configuration", configuration.rawValue, "--product", "Nab"],
+        in: projectRoot
     )
     let binaryDirectory = try run(
         swift,
-        arguments: ["build", "--configuration", configuration.rawValue, "--show-bin-path"],
-        in: packageRoot,
-        captureOutput: true
+        ["build", "--configuration", configuration.rawValue, "--show-bin-path"],
+        in: projectRoot,
+        capturingOutput: true
     )
     let executable = URL(filePath: binaryDirectory).appending(path: "Nab")
     guard fileManager.isExecutableFile(atPath: executable.path) else {
@@ -76,7 +41,7 @@ func bundleApplication(configuration: BuildConfiguration) throws -> URL {
     }
 
     let outputDirectory =
-        packageRoot
+        projectRoot
         .appending(path: "build")
         .appending(path: configuration.rawValue)
     let application = outputDirectory.appending(path: "Nab.app")
@@ -99,7 +64,7 @@ func bundleApplication(configuration: BuildConfiguration) throws -> URL {
         ofItemAtPath: bundledExecutable.path
     )
 
-    let sourceResources = packageRoot.appending(path: "Sources/Nab/Resources")
+    let sourceResources = projectRoot.appending(path: "Sources/Nab/Resources")
     try fileManager.copyItem(
         at: sourceResources.appending(path: "Info.plist"),
         to: contents.appending(path: "Info.plist")
@@ -108,22 +73,22 @@ func bundleApplication(configuration: BuildConfiguration) throws -> URL {
 
     try run(
         "/usr/bin/iconutil",
-        arguments: [
+        [
             "--convert", "icns",
             "--output", resources.appending(path: "AppIcon.icns").path,
             sourceResources.appending(path: "AppIcon.iconset").path,
         ],
-        in: packageRoot
+        in: projectRoot
     )
     try run(
         "/usr/bin/plutil",
-        arguments: ["-lint", contents.appending(path: "Info.plist").path],
-        in: packageRoot
+        ["-lint", contents.appending(path: "Info.plist").path],
+        in: projectRoot
     )
     try run(
         "/usr/bin/xcrun",
-        arguments: ["dsymutil", executable.path, "-o", stagingSymbols.path],
-        in: packageRoot
+        ["dsymutil", executable.path, "-o", stagingSymbols.path],
+        in: projectRoot
     )
     var signingArguments = [
         "--force", "--sign", "-", "--options", "runtime", "--timestamp=none",
@@ -134,13 +99,13 @@ func bundleApplication(configuration: BuildConfiguration) throws -> URL {
     signingArguments.append(stagingApplication.path)
     try run(
         "/usr/bin/codesign",
-        arguments: signingArguments,
-        in: packageRoot
+        signingArguments,
+        in: projectRoot
     )
     try run(
         "/usr/bin/codesign",
-        arguments: ["--verify", "--deep", "--strict", "--verbose=2", stagingApplication.path],
-        in: packageRoot
+        ["--verify", "--deep", "--strict", "--verbose=2", stagingApplication.path],
+        in: projectRoot
     )
 
     if fileManager.fileExists(atPath: application.path) {
@@ -166,6 +131,5 @@ do {
     let application = try bundleApplication(configuration: configuration)
     print("Built \(application.path)")
 } catch {
-    FileHandle.standardError.write(Data("error: \(error.localizedDescription)\n".utf8))
-    exit(EXIT_FAILURE)
+    fail(error)
 }
