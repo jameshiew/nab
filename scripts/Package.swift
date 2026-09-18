@@ -12,14 +12,14 @@ let package = Package(
         .executable(name: "bundle-app", targets: ["BundleApp"]),
         .executable(name: "collect-diagnostics", targets: ["CollectDiagnostics"]),
         .executable(name: "generate-app-icon", targets: ["GenerateAppIcon"]),
-        .executable(name: "summarize-tests", targets: ["SummarizeTests"]),
+        .executable(name: "run-tests", targets: ["RunTests"]),
     ],
     targets: [
         .target(name: "ScriptSupport"),
         .executableTarget(name: "BundleApp", dependencies: ["ScriptSupport"]),
         .executableTarget(name: "CollectDiagnostics", dependencies: ["ScriptSupport"]),
         .executableTarget(name: "GenerateAppIcon", dependencies: ["ScriptSupport"]),
-        .executableTarget(name: "SummarizeTests", dependencies: ["ScriptSupport"]),
+        .executableTarget(name: "RunTests", dependencies: ["ScriptSupport"]),
     ],
     swiftLanguageModes: [.v6]
 )

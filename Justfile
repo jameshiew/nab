@@ -2,7 +2,6 @@ app_name := "Nab"
 bundle_id := `/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' Sources/Nab/Resources/Info.plist`
 debug_app_path := "build/debug/Nab.app"
 release_app_path := "build/release/Nab.app"
-test_results := "build/test-results.xml"
 script := "swift run --quiet --package-path scripts"
 
 default: verify
@@ -20,17 +19,7 @@ build-release:
     {{ script }} bundle-app release
 
 test:
-    #!/bin/sh
-    set -u
-    rm -f "{{ test_results }}"
-    mkdir -p "$(dirname "{{ test_results }}")"
-    if swift test --parallel --disable-swift-testing --xunit-output "{{ test_results }}"; then
-        status=0
-    else
-        status=$?
-    fi
-    {{ script }} summarize-tests "{{ test_results }}" || exit 1
-    exit "$status"
+    {{ script }} run-tests
 
 test-tsan:
     swift test --sanitize=thread

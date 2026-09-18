@@ -58,6 +58,24 @@ public func run(
         .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
+/// Runs a command and hands back its exit status rather than failing on it,
+/// for a caller that has work to do before it passes that status on.
+public func exitStatus(
+    _ executable: String,
+    _ arguments: [String],
+    in directory: URL? = nil
+) throws -> Int32 {
+    let process = Process()
+    process.executableURL = URL(filePath: executable)
+    process.arguments = arguments
+    process.currentDirectoryURL = directory
+
+    try process.run()
+    process.waitUntilExit()
+
+    return process.terminationStatus
+}
+
 /// Runs a command straight into two files, tolerating failure. Some tools are
 /// worth attempting on a machine that will refuse them, and what they said on
 /// the way out is worth keeping either way.

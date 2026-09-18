@@ -1,18 +1,17 @@
-// Summarizes the xUnit report left behind by `swift test --xunit-output`, so a
-// run ends with a count and the names of whatever failed.
+// Runs the unit tests and summarizes the xUnit report they leave behind, so a
+// run ends with a count and the names of whatever failed rather than with the
+// last few hundred lines of test output.
 
+import Darwin
 import Foundation
 import ScriptSupport
 
 enum SummaryError: LocalizedError {
-    case usage
     case missingResults(URL)
     case malformedResults(URL)
 
     var errorDescription: String? {
         switch self {
-        case .usage:
-            "Usage: summarize-tests <results-file>"
         case .missingResults(let url):
             "No test results were written to \(url.path)"
         case .malformedResults(let url):
@@ -57,16 +56,34 @@ func summarize(_ results: URL) throws -> Summary {
 }
 
 do {
-    let arguments = CommandLine.arguments.dropFirst()
-    guard let path = arguments.first, arguments.count == 1 else {
-        throw SummaryError.usage
+    let fileManager = FileManager.default
+    let results = projectRoot.appending(path: "build/test-results.xml")
+    try? fileManager.removeItem(at: results)
+    try fileManager.createDirectory(
+        at: results.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+
+    // The suite is XCTest only, and swift-testing writes its own report in its
+    // own shape, so leave it switched off and keep one report to read.
+    let status = try exitStatus(
+        "/usr/bin/swift",
+        ["test", "--parallel", "--disable-swift-testing", "--xunit-output", results.path],
+        in: projectRoot
+    )
+    guard fileManager.isReadableFile(atPath: results.path) else {
+        // A run that failed before writing a report has already said why. Pass
+        // its status on rather than burying that behind a second complaint.
+        guard status == EXIT_SUCCESS else { exit(status) }
+        throw SummaryError.missingResults(results)
     }
 
-    let summary = try summarize(URL(filePath: path))
+    let summary = try summarize(results)
     for name in summary.failed {
         print("Failed: \(name)")
     }
     print("Tests: \(summary.tests) run, \(summary.failures) failed, \(summary.errors) errors")
+    exit(status)
 } catch {
     fail(error)
 }
