@@ -1,4 +1,5 @@
 import AppKit
+import ObjectiveC
 import UniformTypeIdentifiers
 import XCTest
 
@@ -243,37 +244,52 @@ final class DragDropTests: XCTestCase {
         await fulfillment(of: [callback], timeout: 1)
     }
 
-    func testPromisePlanCanBeginFulfillmentThroughBackingPasteboard() throws {
+    /// A receiver built from a pasteboard item's property list carries no
+    /// backing pasteboard, so fulfilling it passes a null pasteboard to
+    /// `CFPasteboardSetPasteLocation` and crashes. The receiver AppKit vends
+    /// from `readObjects` carries one, which is why the interpreter reads
+    /// promises that way.
+    ///
+    /// This used to be checked by beginning fulfillment, but AppKit now
+    /// refuses `receivePromisedFiles` outside `-prepareForDragOperation:`,
+    /// `-performDragOperation:` and `-concludeDragOperation:`, and a unit test
+    /// has no drag session to run inside. The backing references are the only
+    /// evidence left, so read them directly and prove the check discriminates
+    /// by building the unbacked receiver alongside.
+    func testPromisePlanCarriesItsBackingPasteboard() throws {
         let promiseDelegate = PromiseDelegate()
         let promise = NSFilePromiseProvider(
             fileType: "public.plain-text",
             delegate: promiseDelegate
         )
         let pasteboard = makePasteboard(with: [promise])
+
         let plans = makeInterpreter().plans(from: pasteboard)
+
         guard case .filePromise(let receiver) = try XCTUnwrap(plans.first) else {
             return XCTFail("Expected a file promise")
         }
-        let destinationURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: destinationURL,
-            withIntermediateDirectories: true
-        )
-        addTeardownBlock {
-            try? FileManager.default.removeItem(at: destinationURL)
-        }
-        let operationQueue = OperationQueue()
-
-        receiver.receivePromisedFiles(
-            atDestination: destinationURL,
-            options: [:],
-            operationQueue: operationQueue,
-            reader: { _, _ in }
-        )
-
         XCTAssertEqual(receiver.fileTypes, ["public.plain-text"])
-        withExtendedLifetime((promiseDelegate, promise, pasteboard, operationQueue)) {}
+        XCTAssertNotNil(try backingReference(named: "_pasteboard", of: receiver))
+        XCTAssertNotNil(try backingReference(named: "_pasteboardItem", of: receiver))
+
+        let item = try XCTUnwrap(pasteboard.pasteboardItems?.first)
+        let promiseType = try XCTUnwrap(
+            NSFilePromiseReceiver.readableDraggedTypes
+                .map { NSPasteboard.PasteboardType($0) }
+                .first(where: item.types.contains)
+        )
+        let unbacked = try XCTUnwrap(
+            NSFilePromiseReceiver(
+                pasteboardPropertyList: try XCTUnwrap(item.propertyList(forType: promiseType)),
+                ofType: promiseType
+            )
+        )
+        XCTAssertEqual(unbacked.fileTypes, receiver.fileTypes)
+        XCTAssertNil(try backingReference(named: "_pasteboard", of: unbacked))
+        XCTAssertNil(try backingReference(named: "_pasteboardItem", of: unbacked))
+
+        withExtendedLifetime((promiseDelegate, promise, pasteboard)) {}
     }
 
     func testPromiseAccumulatorWaitsForTwoSuccessfulCallbacksFromOneReceiver() {
@@ -610,6 +626,20 @@ final class DragDropTests: XCTestCase {
             InboundDropResult(successfulEntries: [], failures: result.failures)
                 .partialFailureMessage
         )
+    }
+
+    /// Reads one of `NSFilePromiseReceiver`'s backing references. They are
+    /// private ivars, so a missing one means AppKit changed shape rather than
+    /// that Nab regressed; say so instead of trapping.
+    private func backingReference(
+        named name: String,
+        of receiver: NSFilePromiseReceiver
+    ) throws -> Any? {
+        let ivar = try XCTUnwrap(
+            class_getInstanceVariable(NSFilePromiseReceiver.self, name),
+            "NSFilePromiseReceiver no longer declares \(name); recheck how a promise plan is verified"
+        )
+        return object_getIvar(receiver, ivar)
     }
 
     private func makeInterpreter() -> DropPasteboardInterpreter {
