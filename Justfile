@@ -28,7 +28,7 @@ test:
     else
         status=$?
     fi
-    scripts/summarize-tests.sh "{{ test_results }}" || exit 1
+    swift scripts/summarize-tests.swift "{{ test_results }}" || exit 1
     exit "$status"
 
 test-tsan:
@@ -42,7 +42,7 @@ quit:
     for _ in $(seq 1 50); do pgrep -xq {{ app_name }} || break; sleep 0.1; done
 
 collect-diagnostics:
-    scripts/collect-diagnostics.sh
+    swift scripts/collect-diagnostics.swift
 
 verify: lint test build-debug
     @echo "verify passed: lint, test, build-debug"
