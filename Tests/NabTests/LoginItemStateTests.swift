@@ -9,7 +9,14 @@ final class LoginItemStateTests: XCTestCase {
         XCTAssertEqual(LoginItemState(.notRegistered), .disabled)
         XCTAssertEqual(LoginItemState(.enabled), .enabled)
         XCTAssertEqual(LoginItemState(.requiresApproval), .requiresApproval)
-        XCTAssertEqual(LoginItemState(.notFound), .unavailable)
+    }
+
+    func testMissingRegistrationKeepsStartAtLoginAvailableAndOff() {
+        let state = LoginItemState(.notFound)
+
+        XCTAssertEqual(state, .disabled)
+        XCTAssertTrue(state.isAvailable)
+        XCTAssertFalse(state.isOn)
     }
 
     func testEnabledAndApprovalRequiredStatesAppearOn() {

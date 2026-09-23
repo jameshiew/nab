@@ -128,14 +128,12 @@ enum LoginItemState: Equatable {
 
     init(_ status: SMAppService.Status) {
         switch status {
-        case .notRegistered:
+        case .notRegistered, .notFound:
             self = .disabled
         case .enabled:
             self = .enabled
         case .requiresApproval:
             self = .requiresApproval
-        case .notFound:
-            self = .unavailable
         @unknown default:
             self = .unavailable
         }
