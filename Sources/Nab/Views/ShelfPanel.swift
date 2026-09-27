@@ -11,6 +11,7 @@ final class ShelfPanel: NSPanel {
     private var isShown = false
     private var customTopLeft: CGPoint?
     private var moveObserver: NSObjectProtocol?
+    private var spaceObserver: NSObjectProtocol?
 
     var size: CGSize { CGSize(width: Self.width, height: currentHeight) }
 
@@ -59,12 +60,29 @@ final class ShelfPanel: NSPanel {
                 Log.shelf.debug("windowDidMove frame=\(self.frame.debugDescription, privacy: .public)")
             }
         }
+
+        spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isShown else { return }
+                Log.shelf.debug(
+                    "activeSpaceDidChange isVisible=\(self.isVisible) isOnActiveSpace=\(self.isOnActiveSpace)"
+                )
+                self.orderFrontRegardless()
+            }
+        }
     }
 
     deinit {
         MainActor.assumeIsolated {
             if let moveObserver {
                 NotificationCenter.default.removeObserver(moveObserver)
+            }
+            if let spaceObserver {
+                NSWorkspace.shared.notificationCenter.removeObserver(spaceObserver)
             }
         }
     }
