@@ -2,20 +2,34 @@ import AppKit
 import SwiftUI
 
 final class ShelfPanel: NSPanel {
+    struct Display {
+        let id: CGDirectDisplayID
+        let frame: CGRect
+        let visibleFrame: CGRect
+    }
+
     static let width: CGFloat = 220
     static let baseHeight = PanelGeometry.baseHeight
     static let edgeInset: CGFloat = 12
 
-    private(set) var currentHeight: CGFloat = baseHeight
+    private let displays: @MainActor () -> [Display]
+    private var presentationDisplayID: CGDirectDisplayID?
     private var itemCount = 0
     private var isShown = false
     private var customTopLeft: CGPoint?
     private var moveObserver: NSObjectProtocol?
     private var spaceObserver: NSObjectProtocol?
+    private var screenObserver: NSObjectProtocol?
 
-    var size: CGSize { CGSize(width: Self.width, height: currentHeight) }
+    var currentHeight: CGFloat { visibleFrame.height }
+    var size: CGSize { visibleFrame.size }
 
-    init(rootView: some View) {
+    init(
+        rootView: some View,
+        displays: @escaping @MainActor () -> [Display] = ShelfPanel.availableDisplays,
+        customTopLeft: CGPoint? = ShelfPreferences.topLeft
+    ) {
+        self.displays = displays
         super.init(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -24,7 +38,7 @@ final class ShelfPanel: NSPanel {
         )
         isFloatingPanel = true
         level = .floating
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        collectionBehavior = [.canJoinAllSpaces, .canJoinAllApplications, .fullScreenAuxiliary, .stationary]
         becomesKeyOnlyIfNeeded = true
         hidesOnDeactivate = false
         isMovableByWindowBackground = false
@@ -33,7 +47,8 @@ final class ShelfPanel: NSPanel {
         isOpaque = false
         hasShadow = true
 
-        customTopLeft = ShelfPreferences.topLeft
+        self.customTopLeft = customTopLeft
+        presentationDisplayID = display(at: NSEvent.mouseLocation)?.id
 
         let host = NSHostingView(rootView: rootView)
         host.translatesAutoresizingMaskIntoConstraints = false
@@ -74,6 +89,16 @@ final class ShelfPanel: NSPanel {
                 self.orderFrontRegardless()
             }
         }
+
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.restoreAfterDisplayChange()
+            }
+        }
     }
 
     deinit {
@@ -84,6 +109,9 @@ final class ShelfPanel: NSPanel {
             if let spaceObserver {
                 NSWorkspace.shared.notificationCenter.removeObserver(spaceObserver)
             }
+            if let screenObserver {
+                NotificationCenter.default.removeObserver(screenObserver)
+            }
         }
     }
 
@@ -91,41 +119,40 @@ final class ShelfPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     var visibleFrame: NSRect {
-        if let top = customTopLeft {
-            let proposed = NSRect(
-                x: top.x,
-                y: top.y - size.height,
-                width: size.width,
-                height: size.height
-            )
-            if let frame = Self.clampedVisibleFrame(for: proposed) {
-                return frame
-            }
-            Log.shelf.debug(
-                "visibleFrame custom OFF-SCREEN top=\(top.debugDescription, privacy: .public) proposed=\(proposed.debugDescription, privacy: .public)"
-            )
-        }
-        return Self.defaultVisibleFrame(for: size)
+        let screen =
+            presentationDisplay?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: Self.width, height: Self.baseHeight)
+        return PanelGeometry.visibleFrame(
+            width: Self.width,
+            itemCount: itemCount,
+            customTopLeft: customTopLeft,
+            edgeInset: Self.edgeInset,
+            in: screen
+        )
     }
 
     var edgeFrame: NSRect {
         PanelGeometry.frameAtNearestHorizontalEdge(
             for: visibleFrame,
-            in: NSScreen.screens.map(\.frame)
+            in: displays().map(\.frame)
         )
     }
 
     func userDidFinishDragging() {
-        let proposed =
-            Self.clampedVisibleFrame(for: frame) == nil
-            ? Self.defaultVisibleFrame(for: size) : frame
-        let screen = Self.screenBestMatching(proposed)?.visibleFrame ?? proposed
+        let matchingDisplay = displayBestMatching(frame)
+        let isOnScreen =
+            matchingDisplay.map {
+                ScreenGeometry.intersectionArea(frame, $0.visibleFrame) > 0
+            } ?? false
+        let proposed = isOnScreen ? frame : visibleFrame
+        let targetDisplay = isOnScreen ? matchingDisplay : presentationDisplay
+        presentationDisplayID = targetDisplay?.id
+        let screen = targetDisplay?.visibleFrame ?? proposed
         let savedFrame = PanelGeometry.resizedVisibleFrame(
             for: proposed,
             itemCount: itemCount,
             in: screen
         )
-        currentHeight = savedFrame.height
         if savedFrame != frame {
             setFrame(savedFrame, display: true)
         }
@@ -138,12 +165,18 @@ final class ShelfPanel: NSPanel {
         ShelfPreferences.topLeft = topLeft
     }
 
-    func slideIn() {
+    func slideIn(at point: NSPoint = NSEvent.mouseLocation) {
+        let previousDisplayID = presentationDisplayID
+        presentationDisplayID = display(at: point)?.id
         let target = visibleFrame
+        if !isShown || previousDisplayID != presentationDisplayID {
+            setFrame(edgeFrame, display: false)
+        }
         Log.shelf.debug("slideIn target=\(target.debugDescription, privacy: .public)")
         isShown = true
         orderFrontRegardless()
         animate(to: target)
+        recordPresentationEvent("shelf_presented")
     }
 
     func slideOut() {
@@ -158,13 +191,7 @@ final class ShelfPanel: NSPanel {
 
     func updateHeight(forItemCount count: Int) {
         itemCount = count
-        let screenHeight =
-            Self.screenBestMatching(visibleFrame)?.visibleFrame.height
-            ?? NSScreen.main?.visibleFrame.height
-            ?? Self.baseHeight
-        let newHeight = PanelGeometry.height(forItemCount: count, screenHeight: screenHeight)
-        guard abs(newHeight - currentHeight) > 0.5 else { return }
-        currentHeight = newHeight
+        guard abs(visibleFrame.height - frame.height) > 0.5 else { return }
         if isShown {
             animate(to: visibleFrame)
         } else {
@@ -188,34 +215,57 @@ final class ShelfPanel: NSPanel {
         }
     }
 
-    private static func defaultVisibleFrame(for size: CGSize) -> NSRect {
-        let screen = NSScreen.main?.visibleFrame ?? NSRect(origin: .zero, size: size)
-        let proposed = NSRect(
-            x: screen.maxX - size.width - edgeInset,
-            y: screen.midY - size.height / 2,
-            width: size.width,
-            height: size.height
-        )
-        return clampedFrame(proposed, to: screen)
+    private var presentationDisplay: Display? {
+        let available = displays()
+        return available.first { $0.id == presentationDisplayID } ?? available.first
     }
 
-    private static func clampedVisibleFrame(for proposed: NSRect) -> NSRect? {
-        guard let screen = screenBestMatching(proposed),
-            ScreenGeometry.intersectionArea(proposed, screen.visibleFrame) > 0
-        else {
-            return nil
-        }
-        return clampedFrame(proposed, to: screen.visibleFrame)
+    private func display(at point: NSPoint) -> Display? {
+        let available = displays()
+        return available.first { $0.frame.contains(point) } ?? presentationDisplay
     }
 
-    private static func screenBestMatching(_ rect: NSRect) -> NSScreen? {
-        let screens = NSScreen.screens
+    private func displayBestMatching(_ rect: NSRect) -> Display? {
+        let screens = displays()
         let frames = screens.map(\.visibleFrame)
         guard let index = ScreenGeometry.bestMatchingIndex(for: rect, in: frames) else { return nil }
         return screens[index]
     }
 
-    private static func clampedFrame(_ frame: NSRect, to bounds: NSRect) -> NSRect {
-        ScreenGeometry.clampedFrame(frame, to: bounds)
+    private func restoreAfterDisplayChange() {
+        if !displays().contains(where: { $0.id == presentationDisplayID }) {
+            presentationDisplayID = display(at: NSEvent.mouseLocation)?.id
+        }
+        let target = isShown ? visibleFrame : edgeFrame
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            self.animator().setFrame(target, display: self.isShown)
+        }
+        if isShown {
+            orderFrontRegardless()
+        } else {
+            orderOut(nil)
+        }
+        recordPresentationEvent("display_configuration_changed")
+    }
+
+    private func recordPresentationEvent(_ name: String) {
+        DiagnosticsRecorder.shared.record(
+            name,
+            details: [
+                "display_id": presentationDisplayID.map(String.init) ?? "none",
+                "frame": NSStringFromRect(frame),
+                "is_on_active_space": String(isOnActiveSpace),
+                "is_shown": String(isShown),
+                "is_visible": String(isVisible),
+            ]
+        )
+    }
+
+    private static func availableDisplays() -> [Display] {
+        NSScreen.screens.compactMap { screen in
+            guard let id = screen.cgDirectDisplayID else { return nil }
+            return Display(id: id, frame: screen.frame, visibleFrame: screen.visibleFrame)
+        }
     }
 }

@@ -72,8 +72,11 @@ final class DiagnosticsRecorder {
             details: [
                 "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
                     ?? "unknown",
+                "executable_path": Bundle.main.executableURL?.path ?? "unknown",
                 "os": ProcessInfo.processInfo.operatingSystemVersionString,
                 "pid": String(ProcessInfo.processInfo.processIdentifier),
+                "source_revision": Bundle.main.object(forInfoDictionaryKey: "NabSourceRevision") as? String
+                    ?? "unknown",
                 "version": Bundle.main.object(
                     forInfoDictionaryKey: "CFBundleShortVersionString"
                 ) as? String ?? "unknown",

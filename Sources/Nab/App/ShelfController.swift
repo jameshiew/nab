@@ -74,9 +74,10 @@ final class ShelfController {
 
     private func onDragStarted() {
         inDrag = true
-        cursorInsideShelf = panel.visibleFrame.contains(NSEvent.mouseLocation)
         cancelHide()
-        panel.slideIn()
+        let point = NSEvent.mouseLocation
+        panel.slideIn(at: point)
+        cursorInsideShelf = panel.visibleFrame.contains(point)
     }
 
     private func onDragEnded() {

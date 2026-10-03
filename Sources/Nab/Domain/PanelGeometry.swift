@@ -35,6 +35,29 @@ nonisolated enum PanelGeometry {
         return ScreenGeometry.clampedFrame(proposed, to: screen)
     }
 
+    nonisolated static func visibleFrame(
+        width: CGFloat,
+        itemCount: Int,
+        customTopLeft: CGPoint?,
+        edgeInset: CGFloat,
+        in screen: CGRect
+    ) -> CGRect {
+        let height = height(forItemCount: itemCount, screenHeight: screen.height)
+        if let topLeft = customTopLeft {
+            let proposed = CGRect(x: topLeft.x, y: topLeft.y - height, width: width, height: height)
+            if ScreenGeometry.intersectionArea(proposed, screen) > 0 {
+                return ScreenGeometry.clampedFrame(proposed, to: screen)
+            }
+        }
+        let proposed = CGRect(
+            x: screen.maxX - width - edgeInset,
+            y: screen.midY - height / 2,
+            width: width,
+            height: height
+        )
+        return ScreenGeometry.clampedFrame(proposed, to: screen)
+    }
+
     nonisolated static func frameAtNearestHorizontalEdge(
         for frame: CGRect,
         in screens: [CGRect]

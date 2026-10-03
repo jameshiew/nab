@@ -4,6 +4,7 @@ import ScriptSupport
 enum BundleError: LocalizedError {
     case invalidConfiguration(String)
     case missingExecutable(URL)
+    case invalidInfoPlist(URL)
 
     var errorDescription: String? {
         switch self {
@@ -11,6 +12,8 @@ enum BundleError: LocalizedError {
             "Unknown build configuration: \(value)"
         case .missingExecutable(let url):
             "SwiftPM did not produce an executable at \(url.path)"
+        case .invalidInfoPlist(let url):
+            "Expected an Info.plist dictionary at \(url.path)"
         }
     }
 }
@@ -65,10 +68,20 @@ func bundleApplication(configuration: BuildConfiguration) throws -> URL {
     )
 
     let sourceResources = projectRoot.appending(path: "Sources/Nab/Resources")
-    try fileManager.copyItem(
-        at: sourceResources.appending(path: "Info.plist"),
-        to: contents.appending(path: "Info.plist")
+    let sourceInfoPlist = sourceResources.appending(path: "Info.plist")
+    let infoData = try Data(contentsOf: sourceInfoPlist)
+    guard var info = try PropertyListSerialization.propertyList(from: infoData, format: nil) as? [String: Any]
+    else { throw BundleError.invalidInfoPlist(sourceInfoPlist) }
+    let revision = try run(
+        "/usr/bin/git", ["rev-parse", "HEAD"], in: projectRoot, capturingOutput: true
     )
+    let changes = try run(
+        "/usr/bin/git", ["status", "--porcelain"],
+        in: projectRoot, capturingOutput: true
+    )
+    info["NabSourceRevision"] = revision + (changes.isEmpty ? "" : "-modified")
+    try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+        .write(to: contents.appending(path: "Info.plist"))
     try Data("APPL????".utf8).write(to: contents.appending(path: "PkgInfo"))
 
     try run(

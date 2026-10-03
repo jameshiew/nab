@@ -4,6 +4,49 @@ import XCTest
 @testable import Nab
 
 final class PanelGeometryTests: XCTestCase {
+    func testVisibleFrameUsesSelectedDisplayInsteadOfSavedPositionOnAnotherDisplay() {
+        let screen = CGRect(x: -1_280, y: 100, width: 1_280, height: 720)
+
+        let frame = PanelGeometry.visibleFrame(
+            width: 220,
+            itemCount: 10,
+            customTopLeft: CGPoint(x: 1_688, y: 720),
+            edgeInset: 12,
+            in: screen
+        )
+
+        XCTAssertEqual(frame, CGRect(x: -232, y: 140, width: 220, height: 640))
+        XCTAssertTrue(screen.contains(frame))
+    }
+
+    func testVisibleFramePreservesSavedPositionOnSelectedDisplay() {
+        let screen = CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
+
+        let frame = PanelGeometry.visibleFrame(
+            width: 220,
+            itemCount: 0,
+            customTopLeft: CGPoint(x: 300, y: 900),
+            edgeInset: 12,
+            in: screen
+        )
+
+        XCTAssertEqual(frame, CGRect(x: 300, y: 540, width: 220, height: 360))
+    }
+
+    func testVisibleFrameClampsPartiallyVisibleSavedPosition() {
+        let screen = CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
+
+        let frame = PanelGeometry.visibleFrame(
+            width: 220,
+            itemCount: 0,
+            customTopLeft: CGPoint(x: -100, y: 1_200),
+            edgeInset: 12,
+            in: screen
+        )
+
+        XCTAssertEqual(frame, CGRect(x: 0, y: 720, width: 220, height: 360))
+    }
+
     func testMovingExpandedShelfToShorterDisplayKeepsHeaderVisible() {
         let screen = CGRect(x: -1_280, y: 100, width: 1_280, height: 720)
         let height = PanelGeometry.height(forItemCount: 10, screenHeight: 1_080)
