@@ -396,6 +396,81 @@ final class DragDropTests: XCTestCase {
         )
     }
 
+    func testLegacyEmailPromiseMonitorCountsReturnedNamesInsteadOfRepresentations() throws {
+        let fileURL = try makeTemporaryFile(named: "message.eml").resolvingSymlinksInPath()
+        let directoryURL = fileURL.deletingLastPathComponent()
+        var monitor = LegacyEmailPromiseMonitor(
+            expectedFileNames: [fileURL.lastPathComponent],
+            fallbackExpectedFileCount: 2
+        )
+
+        XCTAssertEqual(monitor.expectedFileCount, 1)
+        XCTAssertNil(monitor.completedURLs(in: directoryURL))
+        XCTAssertEqual(
+            monitor.completedURLs(in: directoryURL)?.map { $0.resolvingSymlinksInPath() },
+            [fileURL]
+        )
+
+        let result = monitor.timeoutResult(in: directoryURL)
+
+        XCTAssertEqual(
+            result.successfulEntries.map { $0.url.resolvingSymlinksInPath() },
+            [fileURL]
+        )
+        XCTAssertTrue(result.failures.isEmpty)
+    }
+
+    func testLegacyEmailPromiseMonitorWaitsForEveryReturnedName() throws {
+        let firstURL = try makeTemporaryFile(named: "first.eml").resolvingSymlinksInPath()
+        let directoryURL = firstURL.deletingLastPathComponent()
+        let secondURL = directoryURL.appendingPathComponent("second.eml")
+        var monitor = LegacyEmailPromiseMonitor(
+            expectedFileNames: [secondURL.lastPathComponent, firstURL.lastPathComponent],
+            fallbackExpectedFileCount: 4
+        )
+
+        XCTAssertEqual(monitor.expectedFileCount, 2)
+        XCTAssertNil(monitor.completedURLs(in: directoryURL))
+        XCTAssertNil(monitor.completedURLs(in: directoryURL))
+
+        try Data("second".utf8).write(to: secondURL)
+
+        XCTAssertNil(monitor.completedURLs(in: directoryURL))
+        XCTAssertEqual(
+            monitor.completedURLs(in: directoryURL)?.map { $0.resolvingSymlinksInPath() },
+            [secondURL, firstURL]
+        )
+    }
+
+    func testLegacyEmailPromiseMonitorUsesFallbackWithoutReturnedNames() throws {
+        let firstURL = try makeTemporaryFile(named: "first.eml").resolvingSymlinksInPath()
+        let directoryURL = firstURL.deletingLastPathComponent()
+        let secondURL = directoryURL.appendingPathComponent("second.eml")
+        var monitor = LegacyEmailPromiseMonitor(
+            expectedFileNames: [],
+            fallbackExpectedFileCount: 2
+        )
+
+        XCTAssertEqual(monitor.expectedFileCount, 2)
+        XCTAssertEqual(
+            LegacyEmailPromiseMonitor(
+                expectedFileNames: [],
+                fallbackExpectedFileCount: 0
+            ).expectedFileCount,
+            1
+        )
+        XCTAssertNil(monitor.completedURLs(in: directoryURL))
+        XCTAssertNil(monitor.completedURLs(in: directoryURL))
+
+        try Data("second".utf8).write(to: secondURL)
+
+        XCTAssertNil(monitor.completedURLs(in: directoryURL))
+        XCTAssertEqual(
+            monitor.completedURLs(in: directoryURL)?.map { $0.resolvingSymlinksInPath() },
+            [firstURL, secondURL]
+        )
+    }
+
     func testLegacyEmailPromiseTimeoutPreservesStableFilesAndReportsMissingEmails() throws {
         let firstURL = try makeTemporaryFile(named: "first.eml").resolvingSymlinksInPath()
         let directoryURL = firstURL.deletingLastPathComponent()

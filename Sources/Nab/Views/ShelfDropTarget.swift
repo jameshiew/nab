@@ -252,20 +252,17 @@ struct ShelfDropTarget: NSViewRepresentable {
                 from: sender,
                 at: destinationURL
             )
+            var monitor = LegacyEmailPromiseMonitor(
+                expectedFileNames: fileNames,
+                fallbackExpectedFileCount: fallbackExpectedFileCount
+            )
             DiagnosticsRecorder.shared.record(
                 "drop_legacy_email_promise_monitoring_started",
                 details: [
                     "drop_id": diagnosticDropID,
-                    "expected_file_count": String(
-                        max(fileNames.count, fallbackExpectedFileCount, 1)
-                    ),
+                    "expected_file_count": String(monitor.expectedFileCount),
                     "returned_file_name_count": String(fileNames.count),
                 ]
-            )
-
-            var monitor = LegacyEmailPromiseMonitor(
-                expectedFileNames: fileNames,
-                fallbackExpectedFileCount: fallbackExpectedFileCount
             )
             legacyEmailPromiseTasks[dropID] = Task { @MainActor [weak self] in
                 let deadline = ContinuousClock.now + .seconds(60)

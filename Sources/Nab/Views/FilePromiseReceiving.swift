@@ -155,7 +155,10 @@ struct LegacyEmailPromiseMonitor {
 
     init(expectedFileNames: [String], fallbackExpectedFileCount: Int) {
         self.expectedFileNames = expectedFileNames
-        expectedFileCount = max(expectedFileNames.count, fallbackExpectedFileCount, 1)
+        expectedFileCount =
+            expectedFileNames.isEmpty
+            ? max(fallbackExpectedFileCount, 1)
+            : expectedFileNames.count
     }
 
     mutating func completedURLs(in destinationURL: URL) -> [URL]? {
